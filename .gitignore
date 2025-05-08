@@ -1,0 +1,18 @@
+# Node.js / npm
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+
+# applications/wallet/
+
+# Betriebssystem-spezifische Dateien
+.DS_Store
+Thumbs.db
+
+# Build-Verzeichnisse
+build/
+dist/
+
+# Log-Dateien
+*.log
