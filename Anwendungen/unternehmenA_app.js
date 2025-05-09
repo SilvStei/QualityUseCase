@@ -80,15 +80,44 @@ async function main() {
         await contract.submitTransaction('CreateDPP', dppId, 'Hochwertiges Kunststoffgranulat Typ A', 'ErstelltBeiOrg1');
         console.log(`Unternehmen A: DPP "${dppId}" erfolgreich erstellt.`);
 
-        console.log(`\n--> Unternehmen A (Org1): Lese DPP "${dppId}"...`);
-        let dppResultBytes = await contract.evaluateTransaction('QueryDPP', dppId);
-        console.log(`Unternehmen A: DPP "${dppId}" Daten: ${dppResultBytes.toString()}`);
+        // NEUER TEIL: Testdaten zum DPP hinzufügen
+        console.log(`\n--> Unternehmen A (Org1): Füge LIMS-Testergebnis zu DPP "${dppId}" hinzu...`);
+        const testNameLIMS = "Melt Flow Index (MFI)";
+        const ergebnisLIMS = "22.5";
+        const einheitLIMS = "g/10min";
+        const systemIDLIMS = "LIMS-LAB01";
+        const timestampLIMS = new Date().toISOString(); // Aktueller Zeitstempel im ISO-Format
+        const verantwortlichLIMS = "PrüferA1";
 
+        // Ruft die 'AddTestData' Funktion im Chaincode auf
+        await contract.submitTransaction('AddTestData', dppId, testNameLIMS, ergebnisLIMS, einheitLIMS, systemIDLIMS, timestampLIMS, verantwortlichLIMS);
+        console.log(`Unternehmen A: LIMS-Testergebnis "${testNameLIMS}" erfolgreich zu DPP "${dppId}" hinzugefügt.`);
+
+        // Weiteres Testergebnis hinzufügen (z.B. von einem QMS)
+        console.log(`\n--> Unternehmen A (Org1): Füge QMS-Prüfergebnis zu DPP "${dppId}" hinzu...`);
+        const testNameQMS = "Visuelle Prüfung Charge K4711";
+        const ergebnisQMS = "Bestanden";
+        const einheitQMS = "-"; // Keine Einheit für "Bestanden"
+        const systemIDQMS = "QMS-System";
+        const timestampQMS = new Date().toISOString();
+        const verantwortlichQMS = "PrüferA2";
+
+        // Ruft erneut 'AddTestData' auf
+        await contract.submitTransaction('AddTestData', dppId, testNameQMS, ergebnisQMS, einheitQMS, systemIDQMS, timestampQMS, verantwortlichQMS);
+        console.log(`Unternehmen A: QMS-Prüfergebnis "${testNameQMS}" erfolgreich zu DPP "${dppId}" hinzugefügt.`);
+
+        // DPP inklusive der neuen Testergebnisse abfragen und anzeigen
+        console.log(`\n--> Unternehmen A (Org1): Lese DPP "${dppId}" inklusive aller Testergebnisse...`);
+        let dppResultBytes = await contract.evaluateTransaction('QueryDPP', dppId);
+        let dppMitAllenDaten = JSON.parse(dppResultBytes.toString());
+        console.log(`Unternehmen A: DPP "${dppId}" Daten: ${JSON.stringify(dppMitAllenDaten, null, 2)}`); // Mit Einrückung für bessere Lesbarkeit
+
+        // DPP an Unternehmen B transferieren
         console.log(`\n--> Unternehmen A (Org1): Transferiere DPP "${dppId}" an Unternehmen B (Org2MSP)...`);
-        // Die Funktion 'TransferDPP' im Chaincode erwartet: id, neueEigentuemerOrgMSP
         await contract.submitTransaction('TransferDPP', dppId, 'Org2MSP');
         console.log(`Unternehmen A: DPP "${dppId}" erfolgreich an Org2MSP transferiert.`);
 
+        // Optional: DPP nach dem Transfer erneut lesen, um den Eigentümerwechsel zu bestätigen
         console.log(`\n--> Unternehmen A (Org1): Lese DPP "${dppId}" nach Transfer (Eigentümer sollte Org2MSP sein)...`);
         dppResultBytes = await contract.evaluateTransaction('QueryDPP', dppId);
         const dppNachTransfer = JSON.parse(dppResultBytes.toString());
