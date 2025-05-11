@@ -66,7 +66,7 @@ async function main() {
         // --- Szenario für Unternehmen C ---
         // Unternehmen C muss die ID des DPPs kennen, der ihm von Unternehmen B transferiert wurde.
         // Diese ID muss mit der ID übereinstimmen, die von unternehmenA_app.js erstellt und von unternehmenB_app.js weitergeleitet wurde.
-        const dppIdFromOrgB = "DPP_NODE_1746789214520"; // <<----- BITTE DIESE ID MIT DER AKTUELLEN ID VOM LETZTEN LAUF VON UNTERNEHMEN A/B ERSETZEN
+        const dppIdFromOrgB = "DPP_NODE_1746987560239"; // <<----- BITTE DIESE ID MIT DER AKTUELLEN ID VOM LETZTEN LAUF VON UNTERNEHMEN A/B ERSETZEN
                                                        
         if (dppIdFromOrgB && dppIdFromOrgB.startsWith("DPP_NODE_")) {
             console.log(`\n--> Unternehmen C (${MSP_ID_ORG3}): Lese den von Unternehmen B transferierten DPP "${dppIdFromOrgB}"...`);
