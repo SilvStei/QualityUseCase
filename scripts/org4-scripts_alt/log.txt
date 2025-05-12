@@ -1,0 +1,1 @@
+[31m2025-05-12 10:35:52.363 CEST 0001 ERRO[0m [main] [31;1mInitCmd[0m -> Fatal error when initializing core config : error when reading core config file: Config File "core" Not Found in "[/home/silvan/Masterthesis/fabric-samples/test-network/scripts/org4-scripts]"
