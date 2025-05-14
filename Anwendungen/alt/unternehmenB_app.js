@@ -64,7 +64,7 @@ async function main() {
 
         // Szenario 2: Abfrage des DPPs, der von Unternehmen A transferiert wurde.
         // WICHTIG: Diese ID muss mit der ID übereinstimmen, die vom letzten erfolgreichen Lauf von unternehmenA_app.js ausgegeben wurde!
-        const dppIdTransferred = "DPP_NODE_1746987560239"; // <<----- BITTE DIESE ID PRÜFEN UND MIT DER AKTUELLEN ID VOM LAUF VON UNTERNEHMEN A ERSETZEN
+        const dppIdTransferred = "DPP_NODE_1747226258045"; // <<----- BITTE DIESE ID PRÜFEN UND MIT DER AKTUELLEN ID VOM LAUF VON UNTERNEHMEN A ERSETZEN
                                                        
         if (dppIdTransferred && dppIdTransferred.startsWith("DPP_NODE_")) {
             console.log(`\n--> Unternehmen B (Org2): Lese den von Unternehmen A transferierten DPP "${dppIdTransferred}"...`);
