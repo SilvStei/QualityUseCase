@@ -113,7 +113,7 @@ async function main() {
     // 4. Transfer an Compounder (Org3MSP)
     // -------------------------------------------------------------------------
     console.log('\n--> [B] TransferDPP an Org3MSP');
-    await contract.submitTransaction('TransferDPP', dppId, 'Org3MSP');
+    await contract.submitTransaction('TransferDPP', dppId, 'Org3MSP', GLN_ORG2);
     console.log('✓ Transfer abgeschlossen');
 
     // -------------------------------------------------------------------------

@@ -35,8 +35,8 @@ function makeSgtin(prefix, itemRef, serial) {
 // -----------------------------------------------------------------------------
 // 2. IDs der eingehenden DPPs – hier als Platzhalter anpassen!
 // -----------------------------------------------------------------------------
-const dppIdFromA = 'DPP_A_1747253839013';   // <== hier die echte ID einsetzen (von A → B → C)
-const dppIdFromB = 'DPP_B_1747253924935';   // <== hier die echte ID einsetzen (von B → C)
+const dppIdFromA = 'DPP_A_1747343624592';   // <== hier die echte ID einsetzen (von A → B → C)
+const dppIdFromB = 'DPP_B_1747343658272';   // <== hier die echte ID einsetzen (von B → C)
 
 // -----------------------------------------------------------------------------
 // 3. Hauptablauf
@@ -128,7 +128,7 @@ async function main() {
 	// 3.6 Transfer des aggregierten Passes an Tier-1 (Org4MSP = Unternehmen D)
 	// -------------------------------------------------------------------------
 	console.log('\n--> [C] TransferDPP an Org4MSP');
-	await contract.submitTransaction('TransferDPP', newDppId, 'Org4MSP');
+	await contract.submitTransaction('TransferDPP', newDppId, 'Org4MSP', GLN_ORG3);
 	console.log('✓ Transfer an D abgeschlossen');
 
 	

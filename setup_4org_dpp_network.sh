@@ -6,7 +6,7 @@
 # --- Konfiguration ---
 FABRIC_SAMPLES_DIR="${HOME}/Masterthesis/fabric-samples"
 PROJECT_DIR="${HOME}/Masterthesis/QualityUseCase" # Dein Projektverzeichnis
-CHAINCODE_SRC_FOLDER_NAME="dpp_quality"         # Der Name des Ordners mit deinem Chaincode-Quellcode
+CHAINCODE_SRC_FOLDER_NAME="dpp_quality"          # Der Name des Ordners mit deinem Chaincode-Quellcode
 CHAINCODE_NAME="dpp_quality_go_v2"
 CHANNEL_NAME="mychannel"
 CHAINCODE_LABEL="${CHAINCODE_NAME}_1.0" # Label für das Chaincode-Paket
@@ -27,12 +27,21 @@ infoln() { echo -e "${GREEN}${1}${NC}"; }
 errorln() { echo -e "${RED}${1}${NC}"; }
 warnln() { echo -e "${YELLOW}${1}${NC}"; }
 
+# Sicherstellen, dass Docker Compose Befehle korrekt sind (docker compose vs docker-compose)
+CONTAINER_CLI="docker"
+if command -v ${CONTAINER_CLI}-compose > /dev/null 2>&1; then
+    CONTAINER_CLI_COMPOSE="${CONTAINER_CLI}-compose"
+else
+    CONTAINER_CLI_COMPOSE="${CONTAINER_CLI} compose"
+fi
+infoln "Verwende ${CONTAINER_CLI} und ${CONTAINER_CLI_COMPOSE} für Docker Compose Befehle."
+
 set -e
 
 # --- Schritt 0: Alles Herunterfahren und Bereinigen ---
 infoln "--- Schritt 0: Netzwerk herunterfahren und bereinigen ---"
 
-# Hilfsfunktion zum robusten Entfernen von Docker Volumes (optional, da prune oft reicht)
+# Hilfsfunktion zum robusten Entfernen von Docker Volumes
 remove_volume_if_exists() {
   local VOL_NAME=$1
   if docker volume inspect "$VOL_NAME" >/dev/null 2>&1; then
@@ -62,48 +71,61 @@ fi
 infoln "Fahre Basisnetzwerk herunter..."
 (cd "${FABRIC_SAMPLES_DIR}/test-network" && ./network.sh down) || warnln "Herunterfahren des Basisnetzwerks fehlgeschlagen/übersprungen."
 
-# 3. Explizit Docker-Netzwerk entfernen (wichtig gegen "Network needs to be recreated" Fehler)
+# 3. Explizit Docker-Netzwerk entfernen
 infoln "Entferne Docker-Netzwerk 'fabric_test' explizit..."
-docker network rm fabric_test || warnln "Netzwerk 'fabric_test' nicht gefunden oder konnte nicht entfernt werden."
+if ! docker network rm fabric_test >/dev/null 2>&1; then
+    warnln "Netzwerk 'fabric_test' nicht gefunden oder konnte nicht entfernt werden (dies ist oft OK)."
+fi
 
 # 4. Host-Pfade für CAs bereinigen (wichtig für frische CA-Initialisierung)
-ORG3_CA_DATA_PARENT_DIR="${ADD_ORG3_DIR}/fabric-ca"
-ORG4_CA_DATA_PARENT_DIR="${ADD_ORG4_DIR}/fabric-ca"
-BASE_CA_DATA_PARENT_DIR="${FABRIC_SAMPLES_DIR}/test-network/organizations/fabric-ca"
+ORG3_CA_HOST_DIR="${ADD_ORG3_DIR}/fabric-ca/org3"
+ORG4_CA_HOST_DIR="${ADD_ORG4_DIR}/fabric-ca/org4"
+BASE_ORG1_CA_HOST_DIR="${FABRIC_SAMPLES_DIR}/test-network/organizations/fabric-ca/org1"
+BASE_ORG2_CA_HOST_DIR="${FABRIC_SAMPLES_DIR}/test-network/organizations/fabric-ca/org2"
+BASE_ORDERER_CA_HOST_DIR="${FABRIC_SAMPLES_DIR}/test-network/organizations/fabric-ca/ordererOrg"
 
-#if [ -d "$ORG4_CA_DATA_PARENT_DIR" ]; then
-#   infoln "Lösche und erstelle Host-Pfad-Daten für ca_org4 in ${ORG4_CA_DATA_PARENT_DIR}..."
-#  sudo rm -rf "${ORG4_CA_DATA_PARENT_DIR}/org4" # Nur das spezifische org4-Verzeichnis
-# sudo mkdir -p "${ORG4_CA_DATA_PARENT_DIR}/org4"
-#sudo chmod -R 777 "${ORG4_CA_DATA_PARENT_DIR}/org4" # Berechtigungen für das neue Verzeichnis
-#fi
-#if [ -d "$ORG3_CA_DATA_PARENT_DIR" ]; then
-#    infoln "Lösche und erstelle Host-Pfad-Daten für ca_org3 in ${ORG3_CA_DATA_PARENT_DIR}..."
-#    sudo rm -rf "${ORG3_CA_DATA_PARENT_DIR}/org3"
-#    sudo mkdir -p "${ORG3_CA_DATA_PARENT_DIR}/org3"
-#    sudo chmod -R 777 "${ORG3_CA_DATA_PARENT_DIR}/org3"
-#fi
+cleanup_ca_host_dir() {
+  local CA_DIR_PATH=$1
+  local ORG_NAME_FOR_LOG=$(basename "$CA_DIR_PATH")
+  local CONFIG_FILE="fabric-ca-server-config.yaml"
 
-#if [ -d "$BASE_CA_DATA_PARENT_DIR" ]; then
-#    infoln "Lösche und erstelle Host-Pfad-Daten für Basis-CAs in ${BASE_CA_DATA_PARENT_DIR}..."
-#    sudo rm -rf "${BASE_CA_DATA_PARENT_DIR}/org1"
-#   sudo rm -rf "${BASE_CA_DATA_PARENT_DIR}/org2"
-#    sudo rm -rf "${BASE_CA_DATA_PARENT_DIR}/ordererOrg"
-#    sudo mkdir -p "${BASE_CA_DATA_PARENT_DIR}/org1"
-#    sudo mkdir -p "${BASE_CA_DATA_PARENT_DIR}/org2"
-#    sudo mkdir -p "${BASE_CA_DATA_PARENT_DIR}/ordererOrg"
-#    sudo chmod -R 777 "${BASE_CA_DATA_PARENT_DIR}" # Berechtigungen für das Haupt-CA-Verzeichnis
-#fi
+  if [ -d "$CA_DIR_PATH" ]; then
+    infoln "Bereinige CA-Host-Verzeichnis für ${ORG_NAME_FOR_LOG}: ${CA_DIR_PATH} (behalte ${CONFIG_FILE})"
+    # Iteriere über alle Elemente (Dateien und Verzeichnisse) direkt in CA_DIR_PATH
+    # Diese Schleife behandelt auch versteckte Dateien/Verzeichnisse im obersten Level des CA_DIR_PATH
+    for item in "$CA_DIR_PATH"/* "$CA_DIR_PATH"/.*; do
+      if [ -e "$item" ]; then # Überprüfe, ob das Element existiert (wichtig für Glob-Muster)
+        local item_basename=$(basename "$item")
+        # Überspringe die Konfigurationsdatei, sowie "." und ".."
+        if [ "$item_basename" != "$CONFIG_FILE" ] && [ "$item_basename" != "." ] && [ "$item_basename" != ".." ]; then
+          infoln "  Entferne: $item"
+          sudo rm -rf "$item"
+        fi
+      fi
+    done
+    # Stelle sicher, dass das Verzeichnis selbst noch existiert und die korrekten Berechtigungen hat
+    sudo mkdir -p "$CA_DIR_PATH" # Erstellt das Verzeichnis, falls es durch rm -rf eines Unterordners gelöscht wurde (unwahrscheinlich bei dieser Logik)
+    sudo chmod -R 777 "$CA_DIR_PATH" # Setzt Berechtigungen
+  else
+    warnln "CA-Host-Verzeichnis ${CA_DIR_PATH} für ${ORG_NAME_FOR_LOG} nicht gefunden."
+  fi
+}
+
+# CA-Daten für Org4 bereinigen
+cleanup_ca_host_dir "$ORG4_CA_HOST_DIR"
+
+# CA-Daten für Org3 bereinigen
+cleanup_ca_host_dir "$ORG3_CA_HOST_DIR"
+
+# CA-Daten für Basis-Organisationen bereinigen (optional, network.sh down sollte dies tun)
+# cleanup_ca_host_dir "$BASE_ORG1_CA_HOST_DIR"
+# cleanup_ca_host_dir "$BASE_ORG2_CA_HOST_DIR"
+# cleanup_ca_host_dir "$BASE_ORDERER_CA_HOST_DIR"
 
 # 5. Ungenutzte Docker Volumes entfernen
 infoln "Entferne ungenutzte Docker-Volumes..."
-# Ledger-Volumes von Org3/Org4 (Peer und Compose) löschen
-remove_volume_if_exists "peer0.org3.example.com"
-remove_volume_if_exists "peer0.org4.example.com"
-remove_volume_if_exists "compose_peer0.org3.example.com"
-remove_volume_if_exists "compose_peer0.org4.example.com"
 docker volume prune -f
-
+infoln "Zweiter Durchlauf für Docker Volume Prune zur Sicherheit..."
 docker volume prune -f
 
 # 6. Client Wallet leeren
@@ -111,29 +133,44 @@ infoln "Leere Client-Wallet..."
 rm -rf "${PROJECT_DIR}/Anwendungen/wallet/"*
 mkdir -p "${PROJECT_DIR}/Anwendungen/wallet"
 
-
 # --- Ledger-Bereinigung (Peer0) für Org3 & Org4 ---
 infoln "Bereinige Ledger-Daten von Peer0.org3 und Peer0.org4, falls vorhanden..."
-LEDGER3="${FABRIC_SAMPLES_DIR}/test-network/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com/ledgersData"
-LEDGER4="${FABRIC_SAMPLES_DIR}/test-network/organizations/peerOrganizations/org4.example.com/peers/peer0.org4.example.com/ledgersData"
+LEDGER_BASE_ORG3="${FABRIC_SAMPLES_DIR}/test-network/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com"
+LEDGER_BASE_ORG4="${FABRIC_SAMPLES_DIR}/test-network/organizations/peerOrganizations/org4.example.com/peers/peer0.org4.example.com"
 
-if [ -d "$LEDGER3" ]; then
-  infoln "  Entferne $LEDGER3"
-  rm -rf "$LEDGER3"
+LEDGER_PATH_SUFFIX_1="production"
+LEDGER_PATH_SUFFIX_2="ledgersData"
+
+cleanup_ledger_data() {
+    local PEER_BASE_DIR=$1
+    local ORG_NAME_FOR_LOG=$(basename "$(dirname "$(dirname "$PEER_BASE_DIR")")")
+
+    if [ -d "${PEER_BASE_DIR}/${LEDGER_PATH_SUFFIX_1}" ]; then
+      infoln "  Entferne Ledger-Daten (${LEDGER_PATH_SUFFIX_1}) für ${ORG_NAME_FOR_LOG}..."
+      sudo rm -rf "${PEER_BASE_DIR}/${LEDGER_PATH_SUFFIX_1}"
+    elif [ -d "${PEER_BASE_DIR}/${LEDGER_PATH_SUFFIX_2}" ]; then
+      infoln "  Entferne Ledger-Daten (${LEDGER_PATH_SUFFIX_2}) für ${ORG_NAME_FOR_LOG}..."
+      sudo rm -rf "${PEER_BASE_DIR}/${LEDGER_PATH_SUFFIX_2}"
+    else
+      warnln "  Keine bekannten Ledger-Daten-Verzeichnisse für ${ORG_NAME_FOR_LOG} unter ${PEER_BASE_DIR} gefunden."
+    fi
+}
+
+if [ -d "$LEDGER_BASE_ORG3" ]; then
+  cleanup_ledger_data "$LEDGER_BASE_ORG3"
 fi
 
-if [ -d "$LEDGER4" ]; then
-  infoln "  Entferne $LEDGER4"
-  rm -rf "$LEDGER4"
+if [ -d "$LEDGER_BASE_ORG4" ]; then
+  cleanup_ledger_data "$LEDGER_BASE_ORG4"
 fi
 
 
 # --- Schritt 1: Basisnetzwerk (Org1 & Org2) starten ---
+# ... (Rest deines Skripts bleibt unverändert) ...
+# --- Schritt 1: Basisnetzwerk (Org1 & Org2) starten ---
 infoln "\n--- Schritt 1: Basisnetzwerk (Org1 & Org2) starten ---"
 cd "${FABRIC_SAMPLES_DIR}/test-network"
 infoln "Starte Basisnetzwerk mit Org1, Org2 und CAs und erstelle Channel..."
-# Stelle sicher, dass network.sh die korrekten Image-Tags verwendet (z.B. via network.config)
-# Die Anpassungen in network.sh und network.config sollten dies bereits sicherstellen.
 ./network.sh up createChannel -ca
 
 # --- Schritt 2: Org3 zum Netzwerk hinzufügen (MIT CA) ---
@@ -141,7 +178,7 @@ infoln "\n--- Schritt 2: Org3 zum Netzwerk hinzufügen (mit CA) ---"
 if [ -d "${ADD_ORG3_DIR}" ]; then
   cd "${ADD_ORG3_DIR}"
   infoln "Führe addOrg3.sh aus, um Org3 hinzuzufügen und dessen CA und Peer zu starten..."
-  ./addOrg3.sh up -ca
+  ./addOrg3.sh up -ca 
 
   infoln "Überprüfe Docker-Container nach Hinzufügen von Org3..."
   docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "peer0.org[1-3].example.com|ca_org[1-3]|orderer.example.com" || true
@@ -217,13 +254,13 @@ for i in ${!ORG_NUMS[@]}; do
       errorln "Konnte Package ID nach Installation auf Org${ORG} nicht ermitteln. Ausgabe von queryinstalled:"
       peer lifecycle chaincode queryinstalled --output json | jq
       PACKAGE_ID_ALT=$(peer lifecycle chaincode queryinstalled | grep "Package ID: ${CHAINCODE_LABEL}:" | sed -n 's/Package ID: //; s/, Label:.*$//p')
-       if [ -n "$PACKAGE_ID_ALT" ]; then
+        if [ -n "$PACKAGE_ID_ALT" ]; then
           warnln "Alternative Methode zur Extraktion der Package ID verwendet."
           PACKAGE_ID=$PACKAGE_ID_ALT
-       else
+        else
           errorln "Konnte Package ID auch mit alternativer Methode nicht finden."
           exit 1
-       fi
+        fi
     fi
     PACKAGE_ID=$(echo "$PACKAGE_ID" | xargs) 
     if [ -z "$PACKAGE_ID" ]; then
@@ -280,4 +317,4 @@ infoln "1. cd ${PROJECT_DIR}/Anwendungen"
 infoln "2. node unternehmenA_app.js (DPP ID notieren, repräsentiert Org1)"
 infoln "3. unternehmenB_app.js anpassen (DPP ID eintragen, Transferziel z.B. Org3MSP) und ausführen: node unternehmenB_app.js (repräsentiert Org2)"
 infoln "4. unternehmenC_app.js anpassen (DPP ID eintragen) und ausführen: node unternehmenC_app.js (repräsentiert Org3)"
-# infoln "5. unternehmenD_app.js anpassen (DPP ID eintragen) und ausführen: node unternehmenD_app.js (repräsentiert Org4)"
+infoln "5. unternehmenD_app_v2.js anpassen (DPP ID eintragen) und ausführen: node unternehmenD_app_v2.js (repräsentiert Org4)"

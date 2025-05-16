@@ -112,7 +112,7 @@ async function main() {
 
     // 3.5 Eigentümerwechsel an Unternehmen B (Org2MSP)
     console.log(`\n--> [A] TransferDPP → Org3MSP`);
-    await contract.submitTransaction('TransferDPP', dppId, 'Org3MSP');
+    await contract.submitTransaction('TransferDPP', dppId, 'Org3MSP', GLN_ORG1);
     console.log('✓ Transfer abgeschlossen');
 
     // 3.6 Kontrolle Eigentümer

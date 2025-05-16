@@ -1,13 +1,13 @@
 // -----------------------------------------------------------------------------
-// unternehmenD_app.js – Tier-1 / Spritzgießer (Org4MSP) empfängt Compound-DPP
+// unternehmenD_app_v2.js – Tier-1 / Spritzgießer (Org4MSP) empfängt Compound-DPP
 // Stand: Mai 2025 – Hyperledger Fabric 2.5 / Node SDK 2.2
 // -----------------------------------------------------------------------------
 'use strict';
 
-const { Gateway, Wallets } = require('fabric-network');
-const FabricCAServices    = require('fabric-ca-client');
-const path = require('path');
-const fs   = require('fs');
+const { Gateway, Wallets }   = require('fabric-network');
+const FabricCAServices       = require('fabric-ca-client');
+const path                   = require('path');
+const fs                     = require('fs');
 
 // -----------------------------------------------------------------------------
 // 1. Pfade & Konstanten
@@ -25,7 +25,7 @@ const CA_NAME_ORG4 = 'ca.org4.example.com';
 // -----------------------------------------------------------------------------
 // 2. DPP-ID, die von C übertragen wurde – hier anpassen!
 // -----------------------------------------------------------------------------
-const dppIdFromC = 'DPP_C_1747253988730';  // <== echte ID eintragen
+const dppIdFromC = 'DPP_C_1747343695644';  // <== echte ID eintragen
 
 // -----------------------------------------------------------------------------
 // 3. Hauptablauf
@@ -33,11 +33,11 @@ const dppIdFromC = 'DPP_C_1747253988730';  // <== echte ID eintragen
 async function main() {
   try {
     // 3.1 Wallet & CA ---------------------------------------------------------
-    const ccp    = JSON.parse(fs.readFileSync(ccpPathOrg4, 'utf8'));
-    const caInfo = ccp.certificateAuthorities[CA_NAME_ORG4];
-    const ca     = new FabricCAServices(caInfo.url);
+    const ccp     = JSON.parse(fs.readFileSync(ccpPathOrg4, 'utf8'));
+    const caInfo  = ccp.certificateAuthorities[CA_NAME_ORG4];
+    const ca      = new FabricCAServices(caInfo.url);
+    const wallet  = await Wallets.newFileSystemWallet(walletPath);
 
-    const wallet = await Wallets.newFileSystemWallet(walletPath);
     await enrollAdmin(wallet, ca, MSP_ID_ORG4, 'adminOrg4');
     await registerAndEnrollUser(wallet, ca, MSP_ID_ORG4,
                                 'appUserOrg4', 'adminOrg4', 'org4.department1');
@@ -66,12 +66,12 @@ async function main() {
 
     // 3.4 Eingangsprüfung anhängen (optional) --------------------------------
     const qcIncoming = {
-      testName: 'Eingangsprüfung Granulatfeuchte',
-      result:   '0.04',
-      unit:     '%',
-      systemId: 'LAB-D-IN',
+      testName:    'Eingangsprüfung Granulatfeuchte',
+      result:      '0.04',
+      unit:        '%',
+      systemId:    'LAB-D-IN',
       responsible: 'Qualitätsteam D',
-      timestamp: new Date().toISOString()
+      timestamp:   new Date().toISOString()
     };
 
     console.log('\n--> [D] AddQualityData (Eingangsprüfung)');
@@ -90,6 +90,8 @@ async function main() {
     console.log('\n[D] Gateway getrennt – Unternehmen D abgeschlossen');
   } catch (err) {
     console.error('[D] FEHLER:', err);
+    // Wenn die Identity tatsächlich beim CA-Server existiert, musst du sie
+    // zuerst dort löschen (siehe unten) und dann das Skript erneut ausführen.
     process.exit(1);
   }
 }
@@ -97,29 +99,81 @@ async function main() {
 // -----------------------------------------------------------------------------
 // 4. Hilfsfunktionen
 // -----------------------------------------------------------------------------
-async function enrollAdmin(wallet, ca, mspId, label) {
-  if (await wallet.get(label)) return;
-  const e = await ca.enroll({ enrollmentID: 'admin', enrollmentSecret: 'adminpw' });
-  await wallet.put(label, {
-    credentials: { certificate: e.certificate, privateKey: e.key.toBytes() },
-    mspId, type: 'X.509'
+async function enrollAdmin(wallet, caClient, mspId, adminLabel) {
+  if (await wallet.get(adminLabel)) {
+    console.log(`→ Admin-Identität '${adminLabel}' bereits im Wallet.`);
+    return;
+  }
+  const enrollment = await caClient.enroll({
+    enrollmentID: 'admin',
+    enrollmentSecret: 'adminpw'
   });
+  const x509Identity = {
+    credentials: {
+      certificate: enrollment.certificate,
+      privateKey: enrollment.key.toBytes(),
+    },
+    mspId: mspId,
+    type: 'X.509',
+  };
+  await wallet.put(adminLabel, x509Identity);
+  console.log(`→ Admin '${adminLabel}' enrollt und im Wallet gespeichert.`);
 }
 
-async function registerAndEnrollUser(wallet, ca, mspId,
+async function registerAndEnrollUser(wallet, caClient, mspId,
                                      userLabel, adminLabel, affiliation) {
-  if (await wallet.get(userLabel)) return;
-  const adminId  = await wallet.get(adminLabel);
-  const provider = wallet.getProviderRegistry().getProvider(adminId.type);
-  const admin    = await provider.getUserContext(adminId, adminLabel);
-  const secret   = await ca.register({
-    affiliation, enrollmentID: userLabel, role: 'client'
-  }, admin);
-  const e = await ca.enroll({ enrollmentID: userLabel, enrollmentSecret: secret });
-  await wallet.put(userLabel, {
-    credentials: { certificate: e.certificate, privateKey: e.key.toBytes() },
-    mspId, type: 'X.509'
+  // 1) Wenn schon im Wallet, dann alles überspringen
+  if (await wallet.get(userLabel)) {
+    console.log(`→ User '${userLabel}' bereits im Wallet – überspringe Registration/Enroll.`);
+    return;
+  }
+
+  // 2) Admin-Context erzeugen
+  const adminIdentity = await wallet.get(adminLabel);
+  if (!adminIdentity) {
+    throw new Error(`Admin-Identität '${adminLabel}' nicht im Wallet gefunden.`);
+  }
+  const provider  = wallet.getProviderRegistry().getProvider(adminIdentity.type);
+  const adminUser = await provider.getUserContext(adminIdentity, adminLabel);
+
+  let enrollmentSecret;
+  // 3) Registrierung versuchen
+  try {
+    enrollmentSecret = await caClient.register({
+      affiliation: affiliation,
+      enrollmentID: userLabel,
+      role: 'client'
+    }, adminUser);
+    console.log(`→ User '${userLabel}' erfolgreich registriert.`);
+  } catch (registerError) {
+    const alreadyRegistered = registerError.errors &&
+      registerError.errors.some(e => e.code === 74);
+    if (alreadyRegistered) {
+      console.warn(`→ '${userLabel}' ist bereits registriert. Es wird ein neuer Secret benötigt.`);
+      console.warn(`  Bitte entferne die Identität beim CA-Server mit:`);
+      console.warn(`    fabric-ca-client identity remove ${userLabel} \\`);
+      console.warn(`      -u https://adminOrg4:adminpw@localhost:9054 \\`);
+      console.warn(`      --tls.certfiles <Pfad-zur-tlsca.pem> --force`);
+      throw new Error('Bitte entferne die bereits registrierte Identity beim CA-Server und starte das Skript erneut.');
+    }
+    throw registerError;
+  }
+
+  // 4) Enroll mit dem erhaltenen Secret
+  const enrollment = await caClient.enroll({
+    enrollmentID: userLabel,
+    enrollmentSecret: enrollmentSecret
   });
+  const x509Identity = {
+    credentials: {
+      certificate: enrollment.certificate,
+      privateKey: enrollment.key.toBytes(),
+    },
+    mspId: mspId,
+    type: 'X.509',
+  };
+  await wallet.put(userLabel, x509Identity);
+  console.log(`→ User '${userLabel}' erfolgreich enrollt und im Wallet gespeichert.`);
 }
 
 // -----------------------------------------------------------------------------
