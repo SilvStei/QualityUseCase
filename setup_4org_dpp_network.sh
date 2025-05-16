@@ -133,6 +133,16 @@ infoln "Leere Client-Wallet..."
 rm -rf "${PROJECT_DIR}/Anwendungen/wallet/"*
 mkdir -p "${PROJECT_DIR}/Anwendungen/wallet"
 
+infoln "Leere spezifische Client-Wallets..."
+rm -rf "${PROJECT_DIR}/Anwendungen/walletA/"*
+mkdir -p "${PROJECT_DIR}/Anwendungen/walletA"
+rm -rf "${PROJECT_DIR}/Anwendungen/walletB/"*
+mkdir -p "${PROJECT_DIR}/Anwendungen/walletB"
+rm -rf "${PROJECT_DIR}/Anwendungen/walletC/"*
+mkdir -p "${PROJECT_DIR}/Anwendungen/walletC"
+rm -rf "${PROJECT_DIR}/Anwendungen/walletD/"*
+mkdir -p "${PROJECT_DIR}/Anwendungen/walletD"
+
 # --- Ledger-Bereinigung (Peer0) für Org3 & Org4 ---
 infoln "Bereinige Ledger-Daten von Peer0.org3 und Peer0.org4, falls vorhanden..."
 LEDGER_BASE_ORG3="${FABRIC_SAMPLES_DIR}/test-network/organizations/peerOrganizations/org3.example.com/peers/peer0.org3.example.com"

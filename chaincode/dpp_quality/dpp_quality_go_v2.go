@@ -1,30 +1,10 @@
 /*
- * dpp_quality_gs1.go – Chaincode für Digital Product Pässe (DPP) mit GS1-ID
- * und EPCIS-Event-Modell. Stand: Mai 2025 – geeignet für Hyperledger Fabric 2.5
- *
- * Anpassungen für verbesserte EPCIS 2.0 Konformität (Mai 2025):
- * - EPCISEvent Struktur: Korrekte JSON-Tags (`epcList`, `inputEPCList`, `outputEPCList`).
- * - ObjectEvent: Verwendet `epcList` statt `outputEPCList`.
- * - TransformationEvent: Verwendet `inputEPCList` und `outputEPCList`.
- * - GS1-Schlüsselvalidierung: Etwas allgemeiner für EPC URNs.
- * - Konsistente Befüllung der EPCIS-Pflicht- und empfohlenen Felder (eventTimeZoneOffset, action, disposition, readPoint, bizLocation).
- * - EventID-Generierung verwendet UnixNano für höhere Eindeutigkeit.
- *
- * Struktur:
- * - DPP          : Basisdaten + Qualitätsblöcke + EPCIS-Events
- * - QualityEntry : Ein einzelnes Testergebnis (Labor, QMS, Inline-Sensor)
- * - EPCISEvent   : Abbild eines EPCIS 2.0 Object- oder TransformationEvents
- *
- * Kernfunktionen:
- * CreateDPP()          – Rohprodukt/Charge anlegen (A, B)
- * AddQualityData()     – Qualitätsinfo anhängen (beliebige Stufe)
- * RecordTransformation() – Misch-/Compounding-Step (C)
- * TransferDPP()        – Eigentümerwechsel entlang Supply-Chain
- * QueryDPP()           – Einzelabfrage
- *
- * Die GS1-Schlüssel werden vom Client erzeugt (empfohlen: SGTIN oder LGTIN als URN).
- * Die Chaincode-Funktionen prüfen lediglich formale Plausibilität. Komplexe
- * GS1-Prüfungen (z. B. Check-Digit) können via Client-SDK erfolgen.
+ * dpp_quality_go_v2.go – Erweiterter Chaincode für Digital Product Pässe (DPP)
+ * Version mit "metadata:\",optional\""‑Tags, damit das Fabric SDK optionale Felder
+ * im generierten JSON‑Schema nicht mehr als „required“ markiert.
+ * Stand: Mai 2025 – geeignet für Hyperledger Fabric 2.5
+ * ------------------------------------------------------------
+ * Hinzugefügt: Debug-Logs und verbesserte Fehlerbehandlung in CreateDPP und RecordTransformation.
  */
 
 package main
@@ -34,59 +14,68 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-// --------------------------- Datenstrukturen --------------------------- //
+// --------------------------- Datenstrukturen (Erweitert) --------------------------- //
+
+type QualitySpecification struct {
+	TestName      string  `json:"testName"`                                         // Eindeutiger Name des Tests
+	IsNumeric     bool    `json:"isNumeric"`                                        // True, wenn das Ergebnis eine Zahl ist
+	LowerLimit    float64 `json:"lowerLimit,omitempty"    metadata:",optional"`     // Untere Toleranzgrenze
+	UpperLimit    float64 `json:"upperLimit,omitempty"    metadata:",optional"`     // Obere Toleranzgrenze
+	ExpectedValue string  `json:"expectedValue,omitempty" metadata:",optional"`     // Erwarteter String-Wert
+	Unit          string  `json:"unit,omitempty"          metadata:",optional"`     // Erwartete Einheit
+	IsMandatory   bool    `json:"isMandatory"`                                      // Zwingend für Freigabe?
+}
 
 type QualityEntry struct {
-	TestName      string `json:"testName"`
-	Result        string `json:"result"`
-	Unit          string `json:"unit"`
-	SystemID      string `json:"systemId"`
-	Timestamp     string `json:"timestamp"`
-	Responsible   string `json:"responsible"`
-	PerformingOrg string `json:"performingOrg"`
+	TestName          string `json:"testName"`
+	Result            string `json:"result"`
+	Unit              string `json:"unit"`
+	SystemID          string `json:"systemId"`                                          // Quelle: LIMS, Sensor …
+	Timestamp         string `json:"timestamp"`
+	Responsible       string `json:"responsible"`
+	PerformingOrg     string `json:"performingOrg"`
+	OffChainDataRef   string `json:"offChainDataRef,omitempty"   metadata:",optional"`
+	EvaluationOutcome string `json:"evaluationOutcome,omitempty" metadata:",optional"`
+	EvaluationComment string `json:"evaluationComment,omitempty" metadata:",optional"`
 }
 
 type EPCISEvent struct {
 	EventID             string                 `json:"eventId"`
-	EventType           string                 `json:"eventType"` // "ObjectEvent" | "TransformationEvent" etc.
+	EventType           string                 `json:"eventType"`
 	EventTime           string                 `json:"eventTime"`
 	EventTimeZoneOffset string                 `json:"eventTimeZoneOffset"`
-	BizStep             string                 `json:"bizStep"` // z.B. "urn:epcglobal:cbv:bizstep:commissioning"
-
-	// Spezifisch für ObjectEvent (und andere, wo relevant)
-	Action      string   `json:"action,omitempty"      metadata:",optional"`      // z.B. "ADD", "OBSERVE", "DELETE"
-	EPCList     []string `json:"epcList,omitempty"     metadata:",optional"`     // Korrektes Feld für ObjectEvent EPCs
-	Disposition string   `json:"disposition,omitempty" metadata:",optional"` // z.B. "urn:epcglobal:cbv:disp:in_progress"
-
-	// Spezifisch für TransformationEvent (und andere, wo relevant)
-	InputEPCList  []string `json:"inputEPCList,omitempty"  metadata:",optional"`  // Korrektes Feld für Transformation Input EPCs
-	OutputEPCList []string `json:"outputEPCList,omitempty" metadata:",optional"` // Korrektes Feld für Transformation Output EPCs
-
-	// Allgemeine, oft empfohlene Felder
-	ReadPoint   string `json:"readPoint,omitempty"   metadata:",optional"`   // z.B. SGLN URN
-	BizLocation string `json:"bizLocation,omitempty" metadata:",optional"` // z.B. SGLN URN
-
-	// Benutzerdefinierte Erweiterungen
-	Extensions map[string]interface{} `json:"extensions"` // Immer initialisiert
+	BizStep             string                 `json:"bizStep"`
+	Action              string                 `json:"action,omitempty"            metadata:",optional"`
+	EPCList             []string               `json:"epcList,omitempty"           metadata:",optional"`
+	Disposition         string                 `json:"disposition,omitempty"       metadata:",optional"`
+	InputEPCList        []string               `json:"inputEPCList,omitempty"      metadata:",optional"`
+	OutputEPCList       []string               `json:"outputEPCList,omitempty"     metadata:",optional"`
+	ReadPoint           string                 `json:"readPoint,omitempty"         metadata:",optional"`
+	BizLocation         string                 `json:"bizLocation,omitempty"       metadata:",optional"`
+	Extensions          map[string]interface{} `json:"extensions"` // immer vorhanden
 }
 
 type DPP struct {
-	DppID           string         `json:"dppId"`           // interne Ledger-ID (Key)
-	GS1Key          string         `json:"gs1Key"`          // z. B. urn:epc:id:sgtin:4012345.012345.12345
-	ManufacturerGLN string         `json:"manufacturerGln"`
-	Batch           string         `json:"batch"`
-	ProductionDate  string         `json:"productionDate"`  // ISO-Date
-	OwnerOrg        string         `json:"ownerOrg"`
-	Status          string         `json:"status"`          // Released / Blocked / Consumed / ...
-	Quality         []QualityEntry `json:"quality"`
-	InputLots       []string       `json:"inputLots"`       // immer initialisiert
-	EPCISEvents     []EPCISEvent   `json:"epcisEvents"`
+	DppID               string                 `json:"dppId"`
+	GS1Key              string                 `json:"gs1Key"`
+	ProductTypeID       string                 `json:"productTypeId,omitempty"     metadata:",optional"`
+	ManufacturerGLN     string                 `json:"manufacturerGln"`
+	Batch               string                 `json:"batch"`
+	ProductionDate      string                 `json:"productionDate"`
+	OwnerOrg            string                 `json:"ownerOrg"`
+	Status              string                 `json:"status"`
+	Specifications      []QualitySpecification `json:"specifications,omitempty"      metadata:",optional"`
+	OpenMandatoryChecks []string               `json:"openMandatoryChecks,omitempty" metadata:",optional"`
+	Quality             []QualityEntry         `json:"quality"`
+	InputDPPIDs         []string               `json:"inputDppIds,omitempty"         metadata:",optional"`
+	EPCISEvents         []EPCISEvent           `json:"epcisEvents"`
 }
 
 // --------------------------- Contract --------------------------- //
@@ -95,13 +84,10 @@ type DPPQualityContract struct {
 	contractapi.Contract
 }
 
-const dppPrefix = "DPP-" // ledger-key = DPP-<dppId>
+const dppPrefix = "DPP-"
 
 // --------------------------- Utils --------------------------- //
 
-// Allgemeinere GS1 EPC URN-Prüfung. Akzeptiert verschiedene EPC-Schemata.
-// Für eine vollständige Validierung (inkl. Check-Digits, korrekte Längen etc.)
-// sollte eine dedizierte GS1-Bibliothek clientseitig verwendet werden.
 var gs1URNRegexp = regexp.MustCompile(`^urn:epc:id:([a-zA-Z0-9_]+):([a-zA-Z0-9\.\-]+)(\.[\w\.\-]+)*$`)
 
 func validateGS1Key(gs1 string) error {
@@ -119,296 +105,678 @@ func (c *DPPQualityContract) dppExists(ctx contractapi.TransactionContextInterfa
 	return data != nil, nil
 }
 
-// tzOffset gibt den aktuellen Timezone-Offset im Format ±HH:MM zurück.
-func tzOffset() string {
-	return time.Now().Format("-07:00") // Beibehaltung des ursprünglichen Formats, das ±HH:MM ergibt
-}
+func tzOffset() string { return time.Now().Format("-07:00") }
 
-// sgln erzeugt eine SGLN URN für einen gegebenen GLN (vereinfachte Annahme für Extension).
 func sgln(gln string) string {
 	if gln == "" {
-		return "" // Leeren String zurückgeben, wenn GLN leer ist, um `omitempty` zu erlauben
+		return ""
 	}
-	return "urn:epc:id:sgln:" + gln + ".0.0" // Vereinfachte Extension, Standard GS1 hat oft .0 für keine Extension
+	return "urn:epc:id:sgln:" + gln + ".0.0"
 }
 
-// --------------------------- Chaincode-APIs --------------------------- //
+// --------------------------- recalculateOverallStatus --------------------------- //
 
-// CreateDPP legt einen neuen Pass für eine Charge / Serienobjekt an.
-func (c *DPPQualityContract) CreateDPP(ctx contractapi.TransactionContextInterface, dppID, gs1Key, manufacturerGLN, batch, productionDate string) error {
+func (dpp *DPP) recalculateOverallStatus() {
+	if dpp.Status == "Blocked" ||
+		strings.HasPrefix(dpp.Status, "ConsumedInTransformation") ||
+		strings.HasPrefix(dpp.Status, "RejectedBy") ||
+		strings.HasPrefix(dpp.Status, "InTransitTo") ||
+		dpp.Status == "AcceptedAtRecipient" {
+		return
+	}
+
+	hasCriticalFailures := false
+	hasDeviations := false
+
+	for _, qe := range dpp.Quality {
+		if qe.EvaluationOutcome == "FAIL" || qe.EvaluationOutcome == "INVALID_FORMAT" {
+			hasCriticalFailures = true
+			break
+		}
+		if strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") {
+			hasDeviations = true
+		}
+	}
+
+	if hasCriticalFailures {
+		dpp.Status = "Blocked"
+		return
+	}
+
+	if len(dpp.OpenMandatoryChecks) == 0 {
+		if hasDeviations {
+			dpp.Status = "ReleasedWithDeviations"
+		} else {
+			dpp.Status = "Released"
+		}
+	} else {
+		dpp.Status = fmt.Sprintf("AwaitingMandatoryChecks (%d open)", len(dpp.OpenMandatoryChecks))
+	}
+}
+
+// --------------------------- Chaincode-APIs (Überarbeitet und Erweitert) --------------------------- //
+
+// CreateDPP: Legt einen neuen DPP an, initialisiert mit Spezifikationen.
+func (c *DPPQualityContract) CreateDPP(ctx contractapi.TransactionContextInterface, dppID, gs1Key, productTypeID, manufacturerGLN, batch, productionDate string, specificationsJSON string) error {
+	fmt.Printf("[CreateDPP-DEBUG] Entry: dppID=%s, gs1Key=%s, productTypeID=%s, manufacturerGLN=%s, batch=%s, productionDate=%s\n", dppID, gs1Key, productTypeID, manufacturerGLN, batch, productionDate)
+
 	exists, err := c.dppExists(ctx, dppID)
 	if err != nil {
+		fmt.Printf("[CreateDPP-ERROR] Fehler bei dppExists für DPP %s: %v\n", dppID, err)
 		return err
 	}
 	if exists {
+		fmt.Printf("[CreateDPP-ERROR] DPP %s existiert bereits.\n", dppID)
 		return fmt.Errorf("DPP %s existiert bereits", dppID)
 	}
 	if err := validateGS1Key(gs1Key); err != nil {
+		fmt.Printf("[CreateDPP-ERROR] Ungültiger GS1 Key %s: %v\n", gs1Key, err)
 		return err
 	}
 
-	clientMSPID, _ := ctx.GetClientIdentity().GetMSPID()
+	var specs []QualitySpecification
+	if specificationsJSON != "" {
+		if err := json.Unmarshal([]byte(specificationsJSON), &specs); err != nil {
+			fmt.Printf("[CreateDPP-ERROR] Spezifikationen JSON fehlerhaft für DPP %s: %v\n", dppID, err)
+			return fmt.Errorf("Spezifikationen JSON fehlerhaft: %v", err)
+		}
+	}
+
+	var openMandatory []string
+	for _, s := range specs {
+		if s.IsMandatory {
+			openMandatory = append(openMandatory, s.TestName)
+		}
+	}
+
+	clientMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
+	if errClientMSPID != nil {
+		fmt.Printf("[CreateDPP-ERROR] Fehler beim Ermitteln der Client MSPID: %v\n", errClientMSPID)
+		return fmt.Errorf("Fehler beim Ermitteln der Client MSPID: %v", errClientMSPID)
+	}
 	now := time.Now()
+	initialStatus := "Draft"
 
 	evt := EPCISEvent{
-		EventID:             fmt.Sprintf("evt-%d", now.UnixNano()),
+		EventID:             fmt.Sprintf("evt-create-%d", now.UnixNano()),
 		EventType:           "ObjectEvent",
 		EventTime:           now.UTC().Format(time.RFC3339),
 		EventTimeZoneOffset: tzOffset(),
 		BizStep:             "urn:epcglobal:cbv:bizstep:commissioning",
 		Action:              "ADD",
-		EPCList:             []string{gs1Key}, // Korrekt für ObjectEvent
-		Disposition:         "urn:epcglobal:cbv:disp:in_progress",
+		EPCList:             []string{gs1Key},
+		Disposition:         "urn:epcglobal:cbv:disp:active",
 		ReadPoint:           sgln(manufacturerGLN),
 		BizLocation:         sgln(manufacturerGLN),
-		Extensions:          map[string]interface{}{},
-		// InputEPCList und OutputEPCList bleiben leer (omitempty)
+		Extensions:          make(map[string]interface{}),
 	}
 
 	dpp := DPP{
-		DppID:           dppID,
-		GS1Key:          gs1Key,
-		ManufacturerGLN: manufacturerGLN,
-		Batch:           batch,
-		ProductionDate:  productionDate,
-		OwnerOrg:        clientMSPID,
-		Status:          "Released",
-		Quality:         []QualityEntry{},
-		InputLots:       []string{},
-		EPCISEvents:     []EPCISEvent{evt},
+		DppID:               dppID,
+		GS1Key:              gs1Key,
+		ProductTypeID:       productTypeID,
+		ManufacturerGLN:     manufacturerGLN,
+		Batch:               batch,
+		ProductionDate:      productionDate,
+		OwnerOrg:            clientMSPID,
+		Status:              initialStatus,
+		Specifications:      specs,
+		OpenMandatoryChecks: openMandatory,
+		Quality:             []QualityEntry{},
+		InputDPPIDs:         []string{},
+		EPCISEvents:         []EPCISEvent{evt},
 	}
 
-	bytes, _ := json.Marshal(dpp)
-	return ctx.GetStub().PutState(dppPrefix+dppID, bytes)
-}
+	dpp.recalculateOverallStatus()
 
-// AddQualityData fügt dem Pass ein neues Testergebnis hinzu.
-// Diese Funktion erzeugt selbst kein EPCIS Event, da Qualitätsdaten oft Teil
-// eines umfassenderen Business Steps sind (z.B. Inspektion, die als eigenes Event erfasst wird).
-// Alternativ könnte hier ein ObservationEvent mit den Qualitätsdaten in Extensions erzeugt werden.
-// Für diese Anpassung bleibt es bei der bisherigen Logik.
-func (c *DPPQualityContract) AddQualityData(ctx contractapi.TransactionContextInterface, dppID string, qualityJSON string) error {
-	exists, err := c.dppExists(ctx, dppID)
-	if err != nil {
-		return err
+	dppBytes, errMarshal := json.Marshal(dpp)
+	if errMarshal != nil {
+		fmt.Printf("[CreateDPP-ERROR] Fehler beim Marshalling von DPP %s: %v\n", dppID, errMarshal)
+		return fmt.Errorf("Fehler beim Marshalling von DPP %s: %v", dppID, errMarshal)
 	}
-	if !exists {
-		return fmt.Errorf("DPP %s nicht gefunden", dppID)
+	logKey := dppPrefix + dppID
+	// Log nur einen Teil der Bytes, um das Log nicht zu überfluten
+	logBytesSample := string(dppBytes)
+	if len(logBytesSample) > 200 {
+		logBytesSample = logBytesSample[:200] + "..."
 	}
-	data, _ := ctx.GetStub().GetState(dppPrefix + dppID)
-	var dpp DPP
-	_ = json.Unmarshal(data, &dpp)
+	fmt.Printf("[CreateDPP-DEBUG] Vor PutState für Key: %s, DPP JSON (Ausschnitt): %s\n", logKey, logBytesSample)
 
-	var q QualityEntry
-	if err := json.Unmarshal([]byte(qualityJSON), &q); err != nil {
-		return fmt.Errorf("Quality-JSON fehlerhaft: %v", err)
+	errPut := ctx.GetStub().PutState(logKey, dppBytes)
+	if errPut != nil {
+		fmt.Printf("[CreateDPP-ERROR] PutState für Key %s fehlgeschlagen: %v\n", logKey, errPut)
+		return errPut
 	}
-
-	if strings.TrimSpace(q.PerformingOrg) == "" {
-		q.PerformingOrg, _ = ctx.GetClientIdentity().GetMSPID()
-	}
-	if q.Timestamp == "" {
-		q.Timestamp = time.Now().UTC().Format(time.RFC3339)
-	}
-
-	dpp.Quality = append(dpp.Quality, q)
-	if strings.Contains(strings.ToLower(q.Result), "fail") {
-		dpp.Status = "Blocked"
-	}
-
-	updated, _ := json.Marshal(dpp)
-	return ctx.GetStub().PutState(dppPrefix+dppID, updated)
-}
-
-// RecordTransformation bildet einen Misch-/Compounding-Schritt ab.
-func (c *DPPQualityContract) RecordTransformation(ctx contractapi.TransactionContextInterface, outputDppID, outputGS1Key, currentGLN, batch, productionDate, inputJSON, qcJSON string) error {
-	if err := validateGS1Key(outputGS1Key); err != nil {
-		return err
-	}
-	exists, err := c.dppExists(ctx, outputDppID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("DPP %s existiert bereits", outputDppID)
-	}
-
-	var inputs []string // Diese werden zu inputEPCList
-	if err := json.Unmarshal([]byte(inputJSON), &inputs); err != nil {
-		return fmt.Errorf("inputJSON ungültig: %v", err)
-	}
-
-	var qc QualityEntry
-	if qcJSON != "" {
-		if err := json.Unmarshal([]byte(qcJSON), &qc); err != nil {
-			return fmt.Errorf("qcJSON fehlerhaft: %v", err)
-		}
-	}
-
-	msp, _ := ctx.GetClientIdentity().GetMSPID()
-	now := time.Now()
-
-	evt := EPCISEvent{
-		EventID:             fmt.Sprintf("evt-%d", now.UnixNano()),
-		EventType:           "TransformationEvent",
-		EventTime:           now.UTC().Format(time.RFC3339),
-		EventTimeZoneOffset: tzOffset(),
-		BizStep:             "urn:epcglobal:cbv:bizstep:commissioning", // Oder passenderer BizStep wie "urn:epcglobal:cbv:bizstep:transforming" oder "urn:epcglobal:cbv:bizstep:compounding"
-		InputEPCList:        inputs,                 // Korrekt für TransformationEvent
-		OutputEPCList:       []string{outputGS1Key}, // Korrekt für TransformationEvent
-		ReadPoint:           sgln(currentGLN),       // Standort, an dem die Transformation stattfindet/erfasst wird
-		BizLocation:         sgln(currentGLN),       // Geschäftsort der Transformation
-		Extensions:          map[string]interface{}{},
-		// Action und Disposition sind für TransformationEvent nicht typisch/standard
-	}
-	if qcJSON != "" {
-		evt.Extensions["quality"] = qc
-	}
-
-	dpp := DPP{
-		DppID:           outputDppID,
-		GS1Key:          outputGS1Key,
-		ManufacturerGLN: currentGLN, // Der GLN der transformierenden Einheit wird zum neuen "Hersteller" dieses DPPs
-		Batch:           batch,
-		ProductionDate:  productionDate,
-		OwnerOrg:        msp,
-		Status:          "Released",
-		Quality:         []QualityEntry{},
-		InputLots:       inputs, // Beibehaltung der Semantik von InputLots
-		EPCISEvents:     []EPCISEvent{evt},
-	}
-	if qcJSON != "" {
-		dpp.Quality = append(dpp.Quality, qc)
-	}
-
-	result, _ := json.Marshal(dpp)
-	return ctx.GetStub().PutState(dppPrefix+outputDppID, result)
-}
-
-// TransferDPP ändert den Eigentümer und erzeugt EPCIS ObjectEvent shipping/receiving.
-// HINWEIS: Für eine präzisere Erfassung sollten ReadPoint/BizLocation des tatsächlichen Versenders
-// und Empfängers als Parameter übergeben oder aus einem Organisationsregister bezogen werden.
-// Hier wird vereinfacht der GLN des aktuellen (Noch-)Eigentümers für den Versand
-// und für den Empfang keine spezifische Location gesetzt (wird durch Client-Anwendung des Empfängers erwartet).
-func (c *DPPQualityContract) TransferDPP(ctx contractapi.TransactionContextInterface, dppID, newOwnerMSP, shipperGLN string) error {
-	data, err := ctx.GetStub().GetState(dppPrefix + dppID)
-	if err != nil {
-		return err
-	}
-	if data == nil {
-		return fmt.Errorf("DPP %s nicht gefunden", dppID)
-	}
-	var dpp DPP
-	_ = json.Unmarshal(data, &dpp)
-
-	// Identität des aktuellen Aufrufers (des aktuellen Eigentümers, der transferiert)
-	// currentOwnerMSPID, _ := ctx.GetClientIdentity().GetMSPID()
-	// if dpp.OwnerOrg != currentOwnerMSPID {
-	//  return fmt.Errorf("nur der aktuelle Eigentümer (%s) kann den DPP transferieren, nicht %s", dpp.OwnerOrg, currentOwnerMSPID)
-	// }
-
-	if dpp.OwnerOrg == newOwnerMSP {
-		return errors.New("neuer Eigentümer entspricht aktuellem Eigentümer")
-	}
-
-	now := time.Now()
-	eventTime := now.UTC().Format(time.RFC3339)
-	timeZoneOffset := tzOffset()
-
-	// Shipping Event (durch den aktuellen Eigentümer/Versender)
-	shipEvt := EPCISEvent{
-		EventID:             fmt.Sprintf("evt-%d-ship", now.UnixNano()),
-		EventType:           "ObjectEvent",
-		EventTime:           eventTime,
-		EventTimeZoneOffset: timeZoneOffset,
-		BizStep:             "urn:epcglobal:cbv:bizstep:shipping",
-		Action:              "OBSERVE", // "DELETE" würde bedeuten, es ist nicht mehr im Besitz des Versenders nachverfolgbar
-		EPCList:             []string{dpp.GS1Key},
-		Disposition:         "urn:epcglobal:cbv:disp:in_transit",
-		ReadPoint:           sgln(shipperGLN), // Standort des Versenders
-		BizLocation:         sgln(shipperGLN), // Geschäftsort des Versenders
-		Extensions:          map[string]interface{}{},
-	}
-
-	// Receiving Event (theoretisch durch den neuen Eigentümer/Empfänger zu erfassen)
-	// Da dies hier im Transfer-Aufruf des *Versenders* geschieht, ist es eine Antizipation
-	// oder ein Platzhalter. Ein echtes Receiving-Event würde vom Empfänger-System ausgelöst.
-	recvEvt := EPCISEvent{
-		EventID:             fmt.Sprintf("evt-%d-recv", now.UnixNano()+1), // leicht andere ID
-		EventType:           "ObjectEvent",
-		EventTime:           eventTime, // Kann leicht später sein, aber oft wird derselbe Zeitpunkt für Transfer verwendet
-		EventTimeZoneOffset: timeZoneOffset,
-		BizStep:             "urn:epcglobal:cbv:bizstep:receiving",
-		Action:              "ADD",
-		EPCList:             []string{dpp.GS1Key},
-		Disposition:         "urn:epcglobal:cbv:disp:available", // Oder "urn:epcglobal:cbv:disp:in_progress" etc.
-		// ReadPoint und BizLocation des Empfängers sind hier nicht bekannt,
-		// sie sollten vom Empfangssystem gesetzt werden. Hier leer lassen (omitempty).
-		ReadPoint:   "", // sgln(newOwnerGLN) - newOwnerGLN müsste übergeben werden
-		BizLocation: "", // sgln(newOwnerGLN)
-		Extensions:  map[string]interface{}{"receivingOrganization": newOwnerMSP},
-	}
-
-	dpp.OwnerOrg = newOwnerMSP // Eigentümerwechsel
-	dpp.Status = fmt.Sprintf("TransferredTo_%s", newOwnerMSP)
-	dpp.EPCISEvents = append(dpp.EPCISEvents, shipEvt, recvEvt)
-
-	updated, _ := json.Marshal(dpp)
-	return ctx.GetStub().PutState(dppPrefix+dppID, updated)
-}
-
-// QueryDPP liefert den kompletten Pass zurück (inkl. Qualität & Events)
-func (c *DPPQualityContract) QueryDPP(ctx contractapi.TransactionContextInterface, dppID string) (*DPP, error) {
-	data, err := ctx.GetStub().GetState(dppPrefix + dppID)
-	if err != nil {
-		return nil, err
-	}
-	if data == nil {
-		return nil, fmt.Errorf("DPP %s nicht gefunden", dppID)
-	}
-	var dpp DPP
-	_ = json.Unmarshal(data, &dpp)
-	return &dpp, nil
-}
-
-// InitLedger kann verwendet werden, um initiale Test-DPPs zu erstellen (optional)
-func (c *DPPQualityContract) InitLedger(ctx contractapi.TransactionContextInterface) error {
-	// Beispiel: Erstelle einen initialen DPP für Org1MSP
-	// Parameter müssen hier fest codiert oder aus einer anderen Quelle bezogen werden.
-	// Für ein echtes Deployment ist diese Funktion oft nicht notwendig oder wird anders gehandhabt.
-
-	/* Beispielhafter Aufruf, der hier nicht direkt ausgeführt wird, sondern als Vorlage dient:
-	dppID := "DPP_INIT_001"
-	gs1Key := "urn:epc:id:sgtin:4000001.000123.98765" // Beispiel SGTIN
-	manufacturerGLN := "4000001000000" // Beispiel GLN für Org1
-	batch := "BATCH_INITIAL_A"
-	productionDate := "2025-01-15"
-
-	// Prüfen, ob DPP bereits existiert
-	exists, err := c.dppExists(ctx, dppID)
-	if err != nil {
-	    return fmt.Errorf("Fehler bei Prüfung von DPP %s: %v", dppID, err)
-	}
-	if !exists {
-	    err = c.CreateDPP(ctx, dppID, gs1Key, manufacturerGLN, batch, productionDate)
-	    if err != nil {
-	        return fmt.Errorf("Fehler beim Erstellen von DPP %s: %v", dppID, err)
-	    }
-	    fmt.Printf("DPP %s für %s initialisiert.\n", dppID, manufacturerGLN)
-	}
-	*/
+	fmt.Printf("[CreateDPP-DEBUG] PutState für Key %s anscheinend erfolgreich.\n", logKey)
 	return nil
 }
 
-/* func main() {
- 	chaincode, err := contractapi.NewChaincode(&DPPQualityContract{})
- 	if err != nil {
-		fmt.Printf("Error creating DPPQuality chaincode: %s", err.Error())
-		return
+// RecordQualityData: Erfasst Qualitätsdaten, bewertet sie gegen Spezifikationen und aktualisiert den DPP-Status.
+// Erzeugt ein EPCIS Event für die Qualitätsprüfung.
+func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContextInterface, dppID string, qualityEntryJSON string, recordingSiteGLN string) error {
+	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
+	if err != nil {
+		return err
+	}
+	if dppBytes == nil {
+		return fmt.Errorf("DPP %s nicht gefunden", dppID)
 	}
 
-	if err := chaincode.Start(); err != nil {
-		fmt.Printf("Error starting DPPQuality chaincode: %s", err.Error())
+	var dpp DPP
+	if err := json.Unmarshal(dppBytes, &dpp); err != nil {
+		return fmt.Errorf("Fehler beim Unmarshalling von DPP %s: %v", dppID, err)
 	}
+
+	var qe QualityEntry
+	if err := json.Unmarshal([]byte(qualityEntryJSON), &qe); err != nil {
+		return fmt.Errorf("QualityEntry JSON fehlerhaft: %v", err)
+	}
+
+	if qe.Timestamp == "" {
+		qe.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	if qe.PerformingOrg == "" {
+		clientMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
+		if errClientMSPID != nil {
+			return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für QualityEntry: %v", errClientMSPID)
+		}
+		qe.PerformingOrg = clientMSPID
+	}
+
+	qe.EvaluationOutcome = "NO_SPEC"
+	qe.EvaluationComment = ""
+	var currentSpec *QualitySpecification
+	for i := range dpp.Specifications {
+		if dpp.Specifications[i].TestName == qe.TestName {
+			currentSpec = &dpp.Specifications[i]
+			break
+		}
+	}
+
+	if currentSpec != nil {
+		if currentSpec.IsNumeric {
+			resultVal, convErr := strconv.ParseFloat(qe.Result, 64)
+			if convErr != nil {
+				qe.EvaluationOutcome = "INVALID_FORMAT"
+				qe.EvaluationComment = fmt.Sprintf("Ergebnis '%s' für Test '%s' ist nicht numerisch.", qe.Result, qe.TestName)
+			} else {
+				if resultVal < currentSpec.LowerLimit {
+					qe.EvaluationOutcome = "DEVIATION_LOW"
+					qe.EvaluationComment = fmt.Sprintf("Wert %.4f unter Grenzwert %.4f %s.", resultVal, currentSpec.LowerLimit, currentSpec.Unit)
+				} else if resultVal > currentSpec.UpperLimit {
+					qe.EvaluationOutcome = "DEVIATION_HIGH"
+					qe.EvaluationComment = fmt.Sprintf("Wert %.4f über Grenzwert %.4f %s.", resultVal, currentSpec.UpperLimit, currentSpec.Unit)
+				} else {
+					qe.EvaluationOutcome = "PASS"
+				}
+			}
+		} else { // String-basierter Test
+			if strings.EqualFold(qe.Result, currentSpec.ExpectedValue) {
+				qe.EvaluationOutcome = "PASS"
+			} else {
+				qe.EvaluationOutcome = "FAIL"
+				qe.EvaluationComment = fmt.Sprintf("Erwartet: '%s', Erhalten: '%s'.", currentSpec.ExpectedValue, qe.Result)
+			}
+		}
+		if currentSpec.Unit != "" && qe.Unit != "" && !strings.EqualFold(currentSpec.Unit, qe.Unit) {
+			qe.EvaluationComment += fmt.Sprintf(" Einheit für '%s' passt nicht: Spezifikation '%s', Eintrag '%s'.", qe.TestName, currentSpec.Unit, qe.Unit)
+		}
+	} else if qe.TestName != "" {
+		qe.EvaluationComment = fmt.Sprintf("Keine Spezifikation für Test '%s' im DPP hinterlegt. Daten werden als informativ gespeichert.", qe.TestName)
+	}
+
+	dpp.Quality = append(dpp.Quality, qe)
+
+	now := time.Now()
+	epcisDisposition := "urn:epcglobal:cbv:disp:active"
+	if qe.EvaluationOutcome == "PASS" {
+		epcisDisposition = "urn:epcglobal:cbv:disp:conformant"
+	} else if strings.HasPrefix(qe.EvaluationOutcome, "FAIL") || strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") || qe.EvaluationOutcome == "INVALID_FORMAT" {
+		epcisDisposition = "urn:epcglobal:cbv:disp:non_conformant"
+	}
+
+	qcEvent := EPCISEvent{
+		EventID:             fmt.Sprintf("evt-qc-%s-%d", strings.ReplaceAll(strings.ReplaceAll(qe.TestName, " ", "_"), "/", "_"), now.UnixNano()),
+		EventType:           "ObjectEvent",
+		EventTime:           now.UTC().Format(time.RFC3339),
+		EventTimeZoneOffset: tzOffset(),
+		BizStep:             "urn:epcglobal:cbv:bizstep:inspecting",
+		Action:              "OBSERVE",
+		EPCList:             []string{dpp.GS1Key},
+		Disposition:         epcisDisposition,
+		ReadPoint:           sgln(recordingSiteGLN),
+		BizLocation:         sgln(recordingSiteGLN),
+		Extensions:          map[string]interface{}{"recordedQualityData": qe},
+	}
+	dpp.EPCISEvents = append(dpp.EPCISEvents, qcEvent)
+
+	if currentSpec != nil && currentSpec.IsMandatory && qe.EvaluationOutcome == "PASS" {
+		var newOpenChecks []string
+		for _, checkName := range dpp.OpenMandatoryChecks {
+			if checkName != qe.TestName {
+				newOpenChecks = append(newOpenChecks, checkName)
+			}
+		}
+		dpp.OpenMandatoryChecks = newOpenChecks
+	}
+	dpp.recalculateOverallStatus()
+
+	if qe.EvaluationOutcome == "FAIL" || strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") || qe.EvaluationOutcome == "INVALID_FORMAT" {
+		alertPayload := map[string]interface{}{
+			"dppId":             dppID,
+			"gs1Key":            dpp.GS1Key,
+			"batch":             dpp.Batch,
+			"productTypeId":     dpp.ProductTypeID,
+			"testName":          qe.TestName,
+			"result":            qe.Result,
+			"evaluationOutcome": qe.EvaluationOutcome,
+			"evaluationComment": qe.EvaluationComment,
+			"timestamp":         qe.Timestamp,
+			"systemId":          qe.SystemID,
+			"performingOrg":     qe.PerformingOrg,
+		}
+		alertBytes, _ := json.Marshal(alertPayload)
+		ctx.GetStub().SetEvent("QualityAlert", alertBytes)
+	}
+
+	updatedDppBytes, _ := json.Marshal(dpp)
+	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
 }
-*/
+
+// RecordTransformation: Erstellt neuen DPP für Compound (C), verknüpft Inputs (A,B)
+func (c *DPPQualityContract) RecordTransformation(ctx contractapi.TransactionContextInterface,
+	outputDppID, outputGS1Key, outputProductTypeID string, // Für neuen DPP von C
+	currentGLN string, // GLN von Unternehmen C (Ort der Transformation)
+	batch, productionDate string, // Für neuen DPP von C
+	inputDPPIDsJSON string, // JSON Array der Ledger-IDs der Input-DPPs (von A, B)
+	outputSpecificationsJSON string, // Spezifikationen für das Compound-Produkt
+	initialQualityEntryJSON string) error { // Optionale initiale Q-Prüfung des Compounds
+
+	fmt.Printf("[RecordTransformation-DEBUG] Entry: outputDppID=%s, outputGS1Key=%s, outputProductTypeID=%s, currentGLN=%s, batch=%s, productionDate=%s\n", outputDppID, outputGS1Key, outputProductTypeID, currentGLN, batch, productionDate)
+	testKey := "TEST_KEY_123"
+    testValue := []byte("test value")
+    fmt.Printf("[RecordTransformation-MINITEST] Versuche PutState für Key: %s\n", testKey)
+    errTestPut := ctx.GetStub().PutState(testKey, testValue)
+    if errTestPut != nil {
+        fmt.Printf("[RecordTransformation-MINITEST-ERROR] PutState für %s fehlgeschlagen: %v\n", testKey, errTestPut)
+        return fmt.Errorf("Minitest PutState fehlgeschlagen: %v", errTestPut)
+    }
+    fmt.Printf("[RecordTransformation-MINITEST] PutState für %s anscheinend erfolgreich.\n", testKey)
+
+    fmt.Printf("[RecordTransformation-MINITEST] Versuche GetState für Key: %s\n", testKey)
+    retrievedValue, errTestGet := ctx.GetStub().GetState(testKey)
+    if errTestGet != nil {
+        fmt.Printf("[RecordTransformation-MINITEST-ERROR] GetState für %s fehlgeschlagen: %v\n", testKey, errTestGet)
+        return fmt.Errorf("Minitest GetState fehlgeschlagen: %v", errTestGet)
+    }
+    if retrievedValue == nil {
+        fmt.Printf("[RecordTransformation-MINITEST-ERROR] GetState für %s lieferte nil!\n", testKey)
+        return fmt.Errorf("Minitest GetState für %s lieferte nil", testKey)
+    }
+    fmt.Printf("[RecordTransformation-MINITEST] GetState für %s erfolgreich. Wert: %s\n", testKey, string(retrievedValue))
+	fmt.Printf("[RecordTransformation-DEBUG] inputDPPIDsJSON: %s\n", inputDPPIDsJSON)
+	fmt.Printf("[RecordTransformation-DEBUG] outputSpecificationsJSON: %s\n", outputSpecificationsJSON)
+	fmt.Printf("[RecordTransformation-DEBUG] initialQualityEntryJSON: %s\n", initialQualityEntryJSON)
+
+	exists, err := c.dppExists(ctx, outputDppID)
+	if err != nil {
+		fmt.Printf("[RecordTransformation-ERROR] Fehler bei dppExists für OutputDPP %s: %v\n", outputDppID, err)
+		return err
+	}
+	if exists {
+		fmt.Printf("[RecordTransformation-ERROR] Output DPP %s existiert bereits.\n", outputDppID)
+		return fmt.Errorf("Output DPP %s existiert bereits", outputDppID)
+	}
+	if err := validateGS1Key(outputGS1Key); err != nil {
+		fmt.Printf("[RecordTransformation-ERROR] Ungültiger GS1 Key %s für OutputDPP: %v\n", outputGS1Key, err)
+		return err
+	}
+
+	var inputDPPIDs []string
+	if err := json.Unmarshal([]byte(inputDPPIDsJSON), &inputDPPIDs); err != nil {
+		fmt.Printf("[RecordTransformation-ERROR] inputDPPIDsJSON (Array von DPP IDs) ungültig: %v\n", err)
+		return fmt.Errorf("inputDPPIDsJSON (Array von DPP IDs) ungültig: %v", err)
+	}
+	fmt.Printf("[RecordTransformation-DEBUG] Parsed inputDPPIDs: %v\n", inputDPPIDs)
+
+	var inputGS1KeysForEvent []string
+	for _, inputID := range inputDPPIDs {
+		fmt.Printf("[RecordTransformation-DEBUG] Verarbeite InputDPP ID: %s\n", inputID)
+		inputDppBytes, errGet := ctx.GetStub().GetState(dppPrefix + inputID)
+		if errGet != nil {
+			fmt.Printf("[RecordTransformation-ERROR] Fehler beim Lesen von Input-DPP %s: %v\n", inputID, errGet)
+			return fmt.Errorf("Fehler beim Lesen von Input-DPP %s: %v", inputID, errGet)
+		}
+		if inputDppBytes == nil {
+			fmt.Printf("[RecordTransformation-ERROR] Input-DPP %s nicht gefunden.\n", inputID)
+			return fmt.Errorf("Input-DPP %s nicht gefunden", inputID)
+		}
+		var inputDPP DPP
+		if errUnmarshalInput := json.Unmarshal(inputDppBytes, &inputDPP); errUnmarshalInput != nil {
+			fmt.Printf("[RecordTransformation-ERROR] Fehler beim Unmarshalling von Input-DPP %s: %v\n", inputID, errUnmarshalInput)
+			return fmt.Errorf("Fehler beim Unmarshalling von Input-DPP %s: %v", inputID, errUnmarshalInput)
+		}
+
+		if inputDPP.Status != "Released" && inputDPP.Status != "ReleasedWithDeviations" && inputDPP.Status != "AcceptedAtRecipient" { // AcceptedAtRecipient hinzugefügt als gültiger Status
+			fmt.Printf("[RecordTransformation-WARN] Input DPP %s (GS1 %s) hat Status '%s'. Transformation wird trotzdem durchgeführt.\n", inputID, inputDPP.GS1Key, inputDPP.Status)
+		}
+		inputGS1KeysForEvent = append(inputGS1KeysForEvent, inputDPP.GS1Key)
+
+		inputDPP.Status = fmt.Sprintf("ConsumedInTransformation_%s", outputDppID)
+		updatedInputBytes, errMarshalInput := json.Marshal(inputDPP)
+		if errMarshalInput != nil {
+			fmt.Printf("[RecordTransformation-ERROR] Fehler beim Marshalling des aktualisierten Input-DPP %s: %v\n", inputID, errMarshalInput)
+			return fmt.Errorf("Fehler beim Marshalling des aktualisierten Input-DPP %s: %v", inputID, errMarshalInput)
+		}
+		if errPutInput := ctx.GetStub().PutState(dppPrefix+inputID, updatedInputBytes); errPutInput != nil {
+			fmt.Printf("[RecordTransformation-ERROR] Fehler beim Aktualisieren des Input-DPP %s: %v\n", inputID, errPutInput)
+			return fmt.Errorf("Fehler beim Aktualisieren des Input-DPP %s: %v", inputID, errPutInput)
+		}
+		fmt.Printf("[RecordTransformation-DEBUG] InputDPP ID %s als 'ConsumedInTransformation_%s' markiert und gespeichert.\n", inputID, outputDppID)
+	}
+
+	fmt.Printf("[RecordTransformation-DEBUG] Rufe CreateDPP auf für outputDppID: %s\n", outputDppID)
+	errCreate := c.CreateDPP(ctx, outputDppID, outputGS1Key, outputProductTypeID, currentGLN, batch, productionDate, outputSpecificationsJSON)
+	if errCreate != nil {
+		fmt.Printf("[RecordTransformation-ERROR] CreateDPP für outputDppID %s ist fehlgeschlagen: %v\n", outputDppID, errCreate)
+		return fmt.Errorf("Fehler beim Erstellen des Output-DPP %s via CreateDPP: %v", outputDppID, errCreate)
+	}
+	fmt.Printf("[RecordTransformation-DEBUG] CreateDPP für outputDppID %s anscheinend erfolgreich zurückgekehrt (errCreate war nil).\n", outputDppID)
+
+	targetKey := dppPrefix + outputDppID
+	fmt.Printf("[RecordTransformation-DEBUG] Versuche GetState für Key: %s\n", targetKey)
+	outputDppBytes, errGetState := ctx.GetStub().GetState(targetKey)
+	if errGetState != nil {
+		fmt.Printf("[RecordTransformation-ERROR] GetState für Key %s gab einen Fehler zurück: %v\n", targetKey, errGetState)
+		return fmt.Errorf("Fehler beim Laden des Output-DPP %s aus dem Ledger (GetState-Fehler): %v", outputDppID, errGetState)
+	}
+	if outputDppBytes == nil {
+		fmt.Printf("[RecordTransformation-ERROR] GetState für Key %s lieferte nil bytes. DPP %s nicht gefunden.\n", targetKey, outputDppID)
+		return fmt.Errorf("Output-DPP %s nach CreateDPP nicht im Ledger gefunden", outputDppID)
+	}
+	fmt.Printf("[RecordTransformation-DEBUG] GetState für Key %s erfolgreich. Bytes Länge: %d\n", targetKey, len(outputDppBytes))
+
+	var outputDPP DPP
+	errUnmarshalOutput := json.Unmarshal(outputDppBytes, &outputDPP)
+	if errUnmarshalOutput != nil {
+		fmt.Printf("[RecordTransformation-ERROR] Fehler beim Unmarshalling des Output-DPP %s (Länge %d): %v\n", outputDppID, len(outputDppBytes), errUnmarshalOutput)
+		return fmt.Errorf("Fehler beim Unmarshalling des Output-DPP %s: %v", outputDppID, errUnmarshalOutput)
+	}
+	fmt.Printf("[RecordTransformation-DEBUG] OutputDPP %s erfolgreich unmarshalled. OwnerOrg: %s, GS1Key: %s\n", outputDppID, outputDPP.OwnerOrg, outputDPP.GS1Key)
+
+	outputDPP.InputDPPIDs = inputDPPIDs
+
+	now := time.Now()
+	tfEvent := EPCISEvent{
+		EventID:             fmt.Sprintf("evt-tf-%s-%d", strings.ReplaceAll(outputGS1Key, ":", "_"), now.UnixNano()),
+		EventType:           "TransformationEvent",
+		EventTime:           now.UTC().Format(time.RFC3339),
+		EventTimeZoneOffset: tzOffset(),
+		BizStep:             "urn:epcglobal:cbv:bizstep:transforming",
+		InputEPCList:        inputGS1KeysForEvent,
+		OutputEPCList:       []string{outputGS1Key},
+		ReadPoint:           sgln(currentGLN),
+		BizLocation:         sgln(currentGLN),
+		Extensions:          make(map[string]interface{}),
+	}
+
+	if initialQualityEntryJSON != "" {
+		var initialQE QualityEntry
+		if errQE := json.Unmarshal([]byte(initialQualityEntryJSON), &initialQE); errQE == nil {
+			if initialQE.Timestamp == "" {
+				initialQE.Timestamp = now.UTC().Format(time.RFC3339)
+			}
+			if initialQE.PerformingOrg == "" {
+				clientMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
+				if errClientMSPID != nil {
+					fmt.Printf("[RecordTransformation-ERROR] Fehler beim Ermitteln der Client MSPID für initialQE: %v\n", errClientMSPID)
+					return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für initialQE: %v", errClientMSPID)
+				}
+				initialQE.PerformingOrg = clientMSPID
+			}
+			tfEvent.Extensions["initialCompoundQuality"] = initialQE
+			fmt.Printf("[RecordTransformation-DEBUG] InitialQE für Extension vorbereitet: %+v\n", initialQE)
+
+			initialQE.EvaluationOutcome = "NO_SPEC"
+			initialQE.EvaluationComment = ""
+			var currentSpecForInitialQE *QualitySpecification
+			for i := range outputDPP.Specifications {
+				if outputDPP.Specifications[i].TestName == initialQE.TestName {
+					currentSpecForInitialQE = &outputDPP.Specifications[i]
+					break
+				}
+			}
+			if currentSpecForInitialQE != nil {
+				if currentSpecForInitialQE.IsNumeric {
+					resVal, convErr := strconv.ParseFloat(initialQE.Result, 64)
+					if convErr != nil {
+						initialQE.EvaluationOutcome = "INVALID_FORMAT"
+						initialQE.EvaluationComment = fmt.Sprintf("Initiales Ergebnis '%s' für Test '%s' ist nicht numerisch.", initialQE.Result, initialQE.TestName)
+					} else {
+						if resVal < currentSpecForInitialQE.LowerLimit {
+							initialQE.EvaluationOutcome = "DEVIATION_LOW_INITIAL"
+							initialQE.EvaluationComment = fmt.Sprintf("Initialer Wert %.4f unter Grenzwert %.4f %s.", resVal, currentSpecForInitialQE.LowerLimit, currentSpecForInitialQE.Unit)
+						} else if resVal > currentSpecForInitialQE.UpperLimit {
+							initialQE.EvaluationOutcome = "DEVIATION_HIGH_INITIAL"
+							initialQE.EvaluationComment = fmt.Sprintf("Initialer Wert %.4f über Grenzwert %.4f %s.", resVal, currentSpecForInitialQE.UpperLimit, currentSpecForInitialQE.Unit)
+						} else {
+							initialQE.EvaluationOutcome = "PASS"
+						}
+					}
+				} else {
+					if strings.EqualFold(initialQE.Result, currentSpecForInitialQE.ExpectedValue) {
+						initialQE.EvaluationOutcome = "PASS"
+					} else {
+						initialQE.EvaluationOutcome = "FAIL_INITIAL"
+						initialQE.EvaluationComment = fmt.Sprintf("Initial erwartet: '%s', Erhalten: '%s'.", currentSpecForInitialQE.ExpectedValue, initialQE.Result)
+					}
+				}
+			} else if initialQE.TestName != "" {
+				initialQE.EvaluationComment = fmt.Sprintf("Keine Spezifikation für initialen Test '%s' im Compound-DPP.", initialQE.TestName)
+			}
+			outputDPP.Quality = append(outputDPP.Quality, initialQE)
+			fmt.Printf("[RecordTransformation-DEBUG] InitialQE zu outputDPP.Quality hinzugefügt: %+v\n", initialQE)
+
+			if currentSpecForInitialQE != nil && currentSpecForInitialQE.IsMandatory && initialQE.EvaluationOutcome == "PASS" {
+				var newOpenChecks []string
+				for _, checkName := range outputDPP.OpenMandatoryChecks {
+					if checkName != initialQE.TestName {
+						newOpenChecks = append(newOpenChecks, checkName)
+					}
+				}
+				outputDPP.OpenMandatoryChecks = newOpenChecks
+				fmt.Printf("[RecordTransformation-DEBUG] OpenMandatoryChecks nach initialQE aktualisiert: %v\n", newOpenChecks)
+			}
+		} else {
+			fmt.Printf("[RecordTransformation-WARN] initialQualityEntryJSON fehlerhaft, wird ignoriert: %v\n", errQE)
+		}
+	} else {
+		if outputDPP.Quality == nil {
+			outputDPP.Quality = []QualityEntry{}
+		}
+	}
+
+	outputDPP.EPCISEvents = append(outputDPP.EPCISEvents, tfEvent)
+	outputDPP.recalculateOverallStatus()
+	fmt.Printf("[RecordTransformation-DEBUG] Status nach recalculateOverallStatus: %s\n", outputDPP.Status)
+
+	finalOutputDppBytes, errMarshalFinal := json.Marshal(outputDPP)
+	if errMarshalFinal != nil {
+		fmt.Printf("[RecordTransformation-ERROR] Fehler beim finalen Marshalling von OutputDPP %s: %v\n", outputDppID, errMarshalFinal)
+		return fmt.Errorf("Fehler beim finalen Marshalling von OutputDPP %s: %v", outputDppID, errMarshalFinal)
+	}
+	logFinalBytesSample := string(finalOutputDppBytes)
+	if len(logFinalBytesSample) > 200 {
+		logFinalBytesSample = logFinalBytesSample[:200] + "..."
+	}
+	fmt.Printf("[RecordTransformation-DEBUG] Vor finalem PutState für Key: %s, OutputDPP JSON (Ausschnitt): %s\n", targetKey, logFinalBytesSample)
+
+	errPutFinal := ctx.GetStub().PutState(targetKey, finalOutputDppBytes)
+	if errPutFinal != nil {
+		fmt.Printf("[RecordTransformation-ERROR] Finales PutState für Key %s fehlgeschlagen: %v\n", targetKey, errPutFinal)
+		return errPutFinal
+	}
+	fmt.Printf("[RecordTransformation-DEBUG] RecordTransformation für OutputDPP %s erfolgreich abgeschlossen.\n", outputDppID)
+	return nil
+}
+
+// TransferDPP: Unternehmen C übergibt den Compound-DPP an D
+func (c *DPPQualityContract) TransferDPP(ctx contractapi.TransactionContextInterface, dppID, newOwnerMSP, shipperGLN string) error {
+	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
+	if err != nil {
+		return err
+	}
+	if dppBytes == nil {
+		return fmt.Errorf("DPP %s nicht gefunden", dppID)
+	}
+	var dpp DPP
+	if errUnmarshal := json.Unmarshal(dppBytes, &dpp); errUnmarshal != nil {
+		return fmt.Errorf("Fehler beim Unmarshalling von DPP %s für Transfer: %v", dppID, errUnmarshal)
+	}
+
+	currentOwnerMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
+	if errClientMSPID != nil {
+		return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für Transfer: %v", errClientMSPID)
+	}
+	if dpp.OwnerOrg != currentOwnerMSPID {
+		return fmt.Errorf("Nur der aktuelle Eigentümer (%s) darf DPP %s transferieren. Aufrufer ist %s.", dpp.OwnerOrg, dppID, currentOwnerMSPID)
+	}
+	if dpp.OwnerOrg == newOwnerMSP {
+		return errors.New("neuer Eigentümer ist identisch mit aktuellem Eigentümer")
+	}
+
+	if dpp.Status != "Released" && dpp.Status != "ReleasedWithDeviations" {
+		return fmt.Errorf("DPP %s (Status: %s) ist nicht für den Transfer freigegeben.", dppID, dpp.Status)
+	}
+
+	now := time.Now()
+	shipEvt := EPCISEvent{
+		EventID:             fmt.Sprintf("evt-ship-%s-%d", strings.ReplaceAll(dpp.GS1Key, ":", "_"), now.UnixNano()),
+		EventType:           "ObjectEvent",
+		EventTime:           now.UTC().Format(time.RFC3339),
+		EventTimeZoneOffset: tzOffset(),
+		BizStep:             "urn:epcglobal:cbv:bizstep:shipping",
+		Action:              "OBSERVE",
+		EPCList:             []string{dpp.GS1Key},
+		Disposition:         "urn:epcglobal:cbv:disp:in_transit",
+		ReadPoint:           sgln(shipperGLN),
+		BizLocation:         "", // Leer, da unterwegs
+		Extensions:          map[string]interface{}{"intendedRecipientMSP": newOwnerMSP},
+	}
+	dpp.EPCISEvents = append(dpp.EPCISEvents, shipEvt)
+	dpp.OwnerOrg = newOwnerMSP
+	dpp.Status = fmt.Sprintf("InTransitTo_%s", newOwnerMSP)
+
+	updatedDppBytes, _ := json.Marshal(dpp)
+	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
+}
+
+// AcknowledgeReceiptAndRecordInspection: Unternehmen D bestätigt Empfang und führt ggf. Eingangsprüfung durch.
+func (c *DPPQualityContract) AcknowledgeReceiptAndRecordInspection(ctx contractapi.TransactionContextInterface, dppID, recipientGLN string, incomingInspectionJSON string) error {
+	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
+	if err != nil {
+		return err
+	}
+	if dppBytes == nil {
+		return fmt.Errorf("DPP %s nicht gefunden", dppID)
+	}
+	var dpp DPP
+	if errUnmarshal := json.Unmarshal(dppBytes, &dpp); errUnmarshal != nil {
+		return fmt.Errorf("Fehler beim Unmarshalling von DPP %s für Acknowledge: %v", dppID, errUnmarshal)
+	}
+
+	recipientMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
+	if errClientMSPID != nil {
+		return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für Acknowledge: %v", errClientMSPID)
+	}
+
+	expectedStatus := "InTransitTo_" + recipientMSPID
+	if dpp.OwnerOrg != recipientMSPID || dpp.Status != expectedStatus {
+		return fmt.Errorf("DPP %s ist nicht für Empfang durch %s vorgesehen oder hat falschen Status/Owner (Status: %s, Owner: %s, Erwartet Status: %s, Erwartet Owner: %s)", dppID, recipientMSPID, dpp.Status, dpp.OwnerOrg, expectedStatus, recipientMSPID)
+	}
+
+	dpp.Status = "AcceptedAtRecipient"
+	ackDisposition := "urn:epcglobal:cbv:disp:in_possession"
+
+	now := time.Now()
+	ackEvt := EPCISEvent{
+		EventID:             fmt.Sprintf("evt-recv-%s-%d", strings.ReplaceAll(dpp.GS1Key, ":", "_"), now.UnixNano()),
+		EventType:           "ObjectEvent",
+		EventTime:           now.UTC().Format(time.RFC3339),
+		EventTimeZoneOffset: tzOffset(),
+		BizStep:             "urn:epcglobal:cbv:bizstep:receiving",
+		Action:              "ADD",
+		EPCList:             []string{dpp.GS1Key},
+		Disposition:         ackDisposition,
+		ReadPoint:           sgln(recipientGLN),
+		BizLocation:         sgln(recipientGLN),
+		Extensions:          make(map[string]interface{}),
+	}
+	dpp.EPCISEvents = append(dpp.EPCISEvents, ackEvt)
+
+	if incomingInspectionJSON != "" {
+		var inspQE QualityEntry
+		if errQE := json.Unmarshal([]byte(incomingInspectionJSON), &inspQE); errQE != nil {
+			fmt.Printf("[Acknowledge-WARN] incomingInspectionJSON für DPP %s fehlerhaft, wird ignoriert: %v\n", dppID, errQE)
+		} else {
+			if inspQE.Timestamp == "" {
+				inspQE.Timestamp = time.Now().UTC().Format(time.RFC3339)
+			}
+			if inspQE.PerformingOrg == "" {
+				// Bereits durch recipientMSPID oben ermittelt
+				inspQE.PerformingOrg = recipientMSPID
+			}
+			inspQE.EvaluationOutcome = "INCOMING_INSPECTION_DATA" // Beispiel, könnte auch bewertet werden
+			dpp.Quality = append(dpp.Quality, inspQE)
+
+			inspTime := time.Now()
+			inspEvent := EPCISEvent{
+				EventID:             fmt.Sprintf("evt-insp-%s-%s-%d", recipientMSPID, strings.ReplaceAll(dpp.GS1Key, ":", "_"), inspTime.UnixNano()),
+				EventType:           "ObjectEvent",
+				EventTime:           inspTime.UTC().Format(time.RFC3339),
+				EventTimeZoneOffset: tzOffset(),
+				BizStep:             "urn:epcglobal:cbv:bizstep:inspecting",
+				Action:              "OBSERVE",
+				EPCList:             []string{dpp.GS1Key},
+				Disposition:         "urn:epcglobal:cbv:disp:active",
+				ReadPoint:           sgln(recipientGLN),
+				BizLocation:         sgln(recipientGLN),
+				Extensions:          map[string]interface{}{"inspectionDataByRecipient": inspQE},
+			}
+			dpp.EPCISEvents = append(dpp.EPCISEvents, inspEvent)
+			// Ggf. dpp.recalculateOverallStatus() wenn die Inspektion mandatorisch war oder Specs hatte
+		}
+	}
+
+	updatedDppBytes, _ := json.Marshal(dpp)
+	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
+}
+
+// QueryDPP: Liest den vollständigen DPP.
+func (c *DPPQualityContract) QueryDPP(ctx contractapi.TransactionContextInterface, dppID string) (*DPP, error) {
+	fmt.Printf("[QueryDPP-DEBUG] Query für dppID: %s\n", dppID)
+	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
+	if err != nil {
+		fmt.Printf("[QueryDPP-ERROR] GetState für dppID %s fehlgeschlagen: %v\n", dppID, err)
+		return nil, err
+	}
+	if dppBytes == nil {
+		fmt.Printf("[QueryDPP-ERROR] DPP %s nicht gefunden.\n", dppID)
+		return nil, fmt.Errorf("DPP %s nicht gefunden", dppID)
+	}
+	fmt.Printf("[QueryDPP-DEBUG] DPP %s gefunden, Bytes Länge: %d\n", dppID, len(dppBytes))
+
+	var dpp DPP
+	if errUnmarshal := json.Unmarshal(dppBytes, &dpp); errUnmarshal != nil {
+		fmt.Printf("[QueryDPP-ERROR] Fehler beim Unmarshalling von DPP %s: %v\n", dppID, errUnmarshal)
+		return nil, fmt.Errorf("Fehler beim Unmarshalling von DPP %s: %v", dppID, errUnmarshal)
+	}
+	fmt.Printf("[QueryDPP-DEBUG] DPP %s erfolgreich unmarshalled. OwnerOrg: %s, GS1Key: %s\n", dppID, dpp.OwnerOrg, dpp.GS1Key)
+	return &dpp, nil
+}
+
+// InitLedger: Kann für Testaufbau verwendet werden (optional).
+func (c *DPPQualityContract) InitLedger(ctx contractapi.TransactionContextInterface) error {
+	fmt.Println("[InitLedger] Aufgerufen, keine Aktion implementiert.")
+	return nil
+}
