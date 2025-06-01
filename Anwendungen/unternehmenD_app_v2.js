@@ -31,7 +31,7 @@ const GLN_ORG4 = '4011111000009'; // Beispiel GLN für Unternehmen D
 // 2. DPP-ID, die von C übertragen wurde – BITTE DIESE ID AKTUALISIEREN
 //    mit der echten ID, die von unternehmenC_app_extended.js ausgegeben wurde!
 // -----------------------------------------------------------------------------
-const dppIdFromC_actual = 'DPP_C_xxxxxxxxxxxxx'; // <== ECHTE ID VON C EINSETZEN
+const dppIdFromC_actual = 'DPP_C_1748781538580'; // <== ECHTE ID VON C EINSETZEN
 
 // -----------------------------------------------------------------------------
 // 3. Hauptablauf

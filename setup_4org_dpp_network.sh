@@ -56,6 +56,7 @@ remove_volume_if_exists() {
 if [ -d "${ADD_ORG4_DIR}" ]; then
   infoln "Fahre Org4-Komponenten herunter..."
   (cd "${ADD_ORG4_DIR}" && ./addOrg4.sh down) || warnln "Herunterfahren von Org4 fehlgeschlagen/übersprungen."
+  remove_volume_if_exists "compose_peer0.org4.example.com"
 else
   warnln "Verzeichnis ${ADD_ORG4_DIR} nicht gefunden."
 fi
@@ -63,6 +64,7 @@ fi
 if [ -d "${ADD_ORG3_DIR}" ]; then
   infoln "Fahre Org3-Komponenten herunter..."
   (cd "${ADD_ORG3_DIR}" && ./addOrg3.sh down) || warnln "Herunterfahren von Org3 fehlgeschlagen/übersprungen."
+  remove_volume_if_exists "compose_peer0.org3.example.com"
 else
   warnln "Verzeichnis ${ADD_ORG3_DIR} nicht gefunden."
 fi
@@ -70,6 +72,9 @@ fi
 # 2. Basisnetzwerk herunterfahren
 infoln "Fahre Basisnetzwerk herunter..."
 (cd "${FABRIC_SAMPLES_DIR}/test-network" && ./network.sh down) || warnln "Herunterfahren des Basisnetzwerks fehlgeschlagen/übersprungen."
+remove_volume_if_exists "compose_peer0.org1.example.com"      # <-- HINZUGEFÜGT
+remove_volume_if_exists "compose_peer0.org2.example.com"      # <-- HINZUGEFÜGT
+remove_volume_if_exists "compose_orderer.example.com"
 
 # 3. Explizit Docker-Netzwerk entfernen
 infoln "Entferne Docker-Netzwerk 'fabric_test' explizit..."
