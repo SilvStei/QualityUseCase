@@ -39,8 +39,8 @@ function makeSgtin(prefix, itemRef, serial) {
 //    mit den echten IDs, die von unternehmenA_app_extended.js
 //    und unternehmenB_app_extended.js ausgegeben wurden!
 // -----------------------------------------------------------------------------
-const dppIdFromA_actual = 'DPP_A_1748812368845'; // <== ECHTE ID VON A EINSETZEN
-const dppIdFromB_actual = 'DPP_B_1748812443642'; // <== ECHTE ID VON B EINSETZEN
+const dppIdFromA_actual = 'DPP_A_1748781448834'; // <== ECHTE ID VON A EINSETZEN
+const dppIdFromB_actual = 'DPP_B_1748781485188'; // <== ECHTE ID VON B EINSETZEN
 
 // -----------------------------------------------------------------------------
 // 3. Hauptablauf
