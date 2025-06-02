@@ -166,7 +166,7 @@ async function main() {
         await queryAndLogDPP(contract, dppIdA, "Nach CreateDPP");
 
         // 2. SIMULIERTE INLINE-MFI-SENSORDATEN ERFASSEN UND INTEGRIEREN
-        const sensorQualityProfile = "BAD"; // Für "schlechte" Daten hier "BAD" einsetzen
+        const sensorQualityProfile = "GOOD"; // Für "schlechte" Daten hier "BAD" einsetzen
         console.log(`\n--> [A] Starte Simulation für Inline-MFI-Sensor (Profil: ${sensorQualityProfile}) für DPP ${dppIdA}`);
 
         // 2.a Sensor-Rohdaten generieren

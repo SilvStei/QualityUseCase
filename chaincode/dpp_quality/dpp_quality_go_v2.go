@@ -1,15 +1,12 @@
 /*
  * dpp_quality_go_v2.go – Erweiterter Chaincode für Digital Product Pässe (DPP)
- * NEUESTE TESTVERSION V99 - DIES MUSS IM PAKET SEIN (oder ein anderer eindeutiger Kommentar zur Versionierung)
- * Version mit "metadata:\",optional\""‑Tags, damit das Fabric SDK optionale Felder
- * im generierten JSON‑Schema nicht mehr als „required“ markiert.
  * Stand: Juni 2025 – geeignet für Hyperledger Fabric 2.5
  * ------------------------------------------------------------
- * Anpassungen:
- * - CreateDPP gibt *DPP und error zurück.
- * - RecordTransformation nutzt das von CreateDPP zurückgegebene DPP-Objekt.
- * - RecordQualityData: 'currentSpec' wird jetzt immer gesucht, um 'undefined' Fehler zu vermeiden
- * und Client-seitiger 'evaluationOutcome' wird respektiert.
+ * NEU: Transport-Monitoring Funktionen und Datenstrukturen.
+ * - DPP-Struktur um TransportLogEntry erweitert.
+ * - Neue Funktion AddTransportUpdate.
+ * - TransferDPP und AcknowledgeReceiptAndRecordInspection angepasst für Transport-Alerts.
+ * - RecordQualityData respektiert Client-seitigen finalen evaluationOutcome.
  */
 
 package main
@@ -26,7 +23,7 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-// --------------------------- Datenstrukturen (Erweitert) --------------------------- //
+// --------------------------- Datenstrukturen --------------------------- //
 
 type QualitySpecification struct {
 	TestName      string  `json:"testName"`
@@ -51,6 +48,16 @@ type QualityEntry struct {
 	EvaluationComment string `json:"evaluationComment,omitempty" metadata:",optional"`
 }
 
+type TransportConditionLogEntry struct {
+	LogType           string `json:"logType"` // z.B. "Temperatur", "Erschuetterung"
+	Value             string `json:"value"`   // z.B. "25", "0.5g"
+	Unit              string `json:"unit"`    // z.B. "°C", "g"
+	Timestamp         string `json:"timestamp"`
+	Status            string `json:"status"`            // z.B. "OK", "ALERT_HIGH", "ALERT_LOW"
+	OffChainLogRef    string `json:"offChainLogRef,omitempty" metadata:",optional"` // Referenz zu detaillierten Rohdaten
+	ResponsibleSystem string `json:"responsibleSystem,omitempty" metadata:",optional"`
+}
+
 type EPCISEvent struct {
 	EventID             string                 `json:"eventId"`
 	EventType           string                 `json:"eventType"`
@@ -68,85 +75,100 @@ type EPCISEvent struct {
 }
 
 type DPP struct {
-	DppID               string                 `json:"dppId"`
-	GS1Key              string                 `json:"gs1Key"`
-	ProductTypeID       string                 `json:"productTypeId,omitempty"     metadata:",optional"`
-	ManufacturerGLN     string                 `json:"manufacturerGln"`
-	Batch               string                 `json:"batch"`
-	ProductionDate      string                 `json:"productionDate"`
-	OwnerOrg            string                 `json:"ownerOrg"`
-	Status              string                 `json:"status"`
-	Specifications      []QualitySpecification `json:"specifications,omitempty"      metadata:",optional"`
-	OpenMandatoryChecks []string               `json:"openMandatoryChecks,omitempty" metadata:",optional"`
-	Quality             []QualityEntry         `json:"quality"`
-	InputDPPIDs         []string               `json:"inputDppIds,omitempty"         metadata:",optional"`
-	EPCISEvents         []EPCISEvent           `json:"epcisEvents"`
+	DppID                 string                      `json:"dppId"`
+	GS1Key                string                      `json:"gs1Key"`
+	ProductTypeID         string                      `json:"productTypeId,omitempty"     metadata:",optional"`
+	ManufacturerGLN       string                      `json:"manufacturerGln"`
+	Batch                 string                      `json:"batch"`
+	ProductionDate        string                      `json:"productionDate"`
+	OwnerOrg              string                      `json:"ownerOrg"`
+	Status                string                      `json:"status"`
+	Specifications        []QualitySpecification      `json:"specifications,omitempty"      metadata:",optional"`
+	OpenMandatoryChecks   []string                    `json:"openMandatoryChecks,omitempty" metadata:",optional"`
+	Quality               []QualityEntry              `json:"quality"`
+	TransportLog          []TransportConditionLogEntry `json:"transportLog,omitempty"      metadata:",optional"` // NEU
+	InputDPPIDs           []string                    `json:"inputDppIds,omitempty"         metadata:",optional"`
+	EPCISEvents           []EPCISEvent                `json:"epcisEvents"`
 }
-
-// --------------------------- Contract --------------------------- //
 
 type DPPQualityContract struct {
 	contractapi.Contract
 }
 
 const dppPrefix = "DPP-"
-
-// --------------------------- Utils --------------------------- //
-
 var gs1URNRegexp = regexp.MustCompile(`^urn:epc:id:([a-zA-Z0-9_]+):([a-zA-Z0-9\.\-]+)(\.[\w\.\-]+)*$`)
 
-func validateGS1Key(gs1 string) error {
+func validateGS1Key(gs1 string) error { /* ... (unverändert) ... */ 
 	if !gs1URNRegexp.MatchString(gs1) {
 		return fmt.Errorf("ungültiger GS1 EPC URN-Schlüssel: %s. Erwartet Format wie urn:epc:id:sgtin:...", gs1)
 	}
 	return nil
 }
-
-func (c *DPPQualityContract) dppExists(ctx contractapi.TransactionContextInterface, dppID string) (bool, error) {
+func (c *DPPQualityContract) dppExists(ctx contractapi.TransactionContextInterface, dppID string) (bool, error) { /* ... (unverändert) ... */ 
 	data, err := ctx.GetStub().GetState(dppPrefix + dppID)
 	if err != nil {
 		return false, err
 	}
 	return data != nil, nil
 }
-
-func tzOffset() string { return time.Now().Format("-07:00") }
-
-func sgln(gln string) string {
+func tzOffset() string { /* ... (unverändert) ... */ return time.Now().Format("-07:00") }
+func sgln(gln string) string { /* ... (unverändert) ... */ 
 	if gln == "" {
 		return ""
 	}
 	return "urn:epc:id:sgln:" + gln + ".0.0"
 }
 
-// --------------------------- recalculateOverallStatus --------------------------- //
-
 func (dpp *DPP) recalculateOverallStatus() {
-	if dpp.Status == "Blocked" ||
-		strings.HasPrefix(dpp.Status, "ConsumedInTransformation") ||
-		strings.HasPrefix(dpp.Status, "RejectedBy") ||
-		strings.HasPrefix(dpp.Status, "InTransitTo") ||
-		dpp.Status == "AcceptedAtRecipient" {
-		if dpp.Status == "Blocked" {
-			// Bleibt geblockt, es sei denn eine explizite Aktion hebt es auf.
-			// Diese Funktion hebt "Blocked" nicht automatisch auf.
-		} else {
-			return
+	// Wenn bereits geblockt, bleibt der Status erstmal "Blocked"
+	// Eine explizite Aktion (nicht Teil dieses Prototyps) wäre nötig, um dies aufzuheben.
+	if dpp.Status == "Blocked" {
+		return
+	}
+	
+	// Andere finale oder prozess-gesteuerte Status nicht überschreiben
+	if strings.HasPrefix(dpp.Status, "ConsumedInTransformation") ||
+		strings.HasPrefix(dpp.Status, "RejectedBy") {
+		return
+	}
+	// Für InTransitTo_ und AcceptedAtRecipient_, behalte den Suffix (z.B. _TransportAlert)
+	if strings.HasPrefix(dpp.Status, "InTransitTo_") || strings.HasPrefix(dpp.Status, "AcceptedAtRecipient_") {
+		// Wenn keine offenen Checks und keine kritischen Fehler, aber ein Alert-Suffix, diesen beibehalten
+		if len(dpp.OpenMandatoryChecks) == 0 {
+			// Prüfe auf kritische Fehler, die nicht schon im Status reflektiert sind
+			for _, qe := range dpp.Quality {
+				if qe.EvaluationOutcome == "FAIL" || qe.EvaluationOutcome == "INVALID_FORMAT" {
+					dpp.Status = "Blocked" // Überschreibt Transport-Alert, wenn kritischer Fehler auftritt
+					return
+				}
+			}
+			// Wenn keine neuen kritischen Fehler, bleibt der Transport-Alert-Status
+			return 
 		}
+		// Wenn offene Checks, dann wird unten auf AwaitingMandatoryChecks gesetzt
 	}
 
+
 	hasCriticalFailures := false
-	hasDeviations := false
+	hasDeviations := false // Beinhaltet jetzt auch Transport-Alerts als eine Form von Deviation
 
 	for _, qe := range dpp.Quality {
 		if qe.EvaluationOutcome == "FAIL" || qe.EvaluationOutcome == "INVALID_FORMAT" {
 			hasCriticalFailures = true
 			break
 		}
-		if strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") {
+		if strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") || strings.Contains(qe.EvaluationOutcome, "ALERT") { // Transport-Alerts auch als Deviation
 			hasDeviations = true
 		}
 	}
+	// Auch TransportLog auf Alerts prüfen
+	for _, tl := range dpp.TransportLog {
+		if strings.Contains(tl.Status, "ALERT") {
+			hasDeviations = true // Transport-Alerts zählen als Abweichung für den Status
+			break 
+		}
+	}
+
 
 	if hasCriticalFailures {
 		dpp.Status = "Blocked"
@@ -155,23 +177,35 @@ func (dpp *DPP) recalculateOverallStatus() {
 
 	if len(dpp.OpenMandatoryChecks) == 0 {
 		if hasDeviations {
-			dpp.Status = "ReleasedWithDeviations"
+			// Versuche, einen spezifischeren "WithDeviations" Status zu finden
+			specificDeviationStatus := "ReleasedWithDeviations" // Default
+			for _, qe := range dpp.Quality {
+				if strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION_") {
+					specificDeviationStatus = "ReleasedWithQualityDeviations"
+					break
+				}
+			}
+			for _, tl := range dpp.TransportLog {
+				if strings.Contains(tl.Status, "ALERT") {
+					if specificDeviationStatus == "ReleasedWithDeviations" { // Noch kein Quality-Deviation
+						specificDeviationStatus = "ReleasedWithTransportAlert"
+					} else { // Bereits Quality-Deviation, füge Hinweis hinzu
+						specificDeviationStatus = "ReleasedWithMultipleIssues"
+					}
+					break
+				}
+			}
+			dpp.Status = specificDeviationStatus
 		} else {
 			dpp.Status = "Released"
 		}
 	} else {
-		currentStatusIsInitialOrAwaiting := dpp.Status == "Draft" || strings.HasPrefix(dpp.Status, "AwaitingMandatoryChecks") || dpp.Status == ""
-		if currentStatusIsInitialOrAwaiting {
-			dpp.Status = fmt.Sprintf("AwaitingMandatoryChecks (%d open)", len(dpp.OpenMandatoryChecks))
-		}
-		// Wenn es vorher z.B. "ReleasedWithDeviations" war und neue offene Checks dazukommen (unwahrscheinlich),
-		// würde es hier auf "AwaitingMandatoryChecks" zurückfallen.
+		dpp.Status = fmt.Sprintf("AwaitingMandatoryChecks (%d open)", len(dpp.OpenMandatoryChecks))
 	}
 }
 
-// --------------------------- Chaincode-APIs (Überarbeitet und Erweitert) --------------------------- //
-
 func (c *DPPQualityContract) CreateDPP(ctx contractapi.TransactionContextInterface, dppID, gs1Key, productTypeID, manufacturerGLN, batch, productionDate string, specificationsJSON string) (*DPP, error) {
+    // ... (Implementierung wie in deiner funktionierenden Version, die *DPP zurückgibt)
 	fmt.Printf("[CreateDPP-DEBUG] Entry: dppID=%s, gs1Key=%s, productTypeID=%s, manufacturerGLN=%s, batch=%s, productionDate=%s\n", dppID, gs1Key, productTypeID, manufacturerGLN, batch, productionDate)
 
 	exists, err := c.dppExists(ctx, dppID)
@@ -237,6 +271,7 @@ func (c *DPPQualityContract) CreateDPP(ctx contractapi.TransactionContextInterfa
 		Specifications:      specs,
 		OpenMandatoryChecks: openMandatory,
 		Quality:             []QualityEntry{},
+		TransportLog:        []TransportConditionLogEntry{}, // Initialisieren
 		InputDPPIDs:         []string{},
 		EPCISEvents:         []EPCISEvent{evt},
 	}
@@ -250,9 +285,7 @@ func (c *DPPQualityContract) CreateDPP(ctx contractapi.TransactionContextInterfa
 	}
 	logKey := dppPrefix + dppID
 	logBytesSample := string(dppBytes)
-	if len(logBytesSample) > 200 {
-		logBytesSample = logBytesSample[:200] + "..."
-	}
+	if len(logBytesSample) > 200 { logBytesSample = logBytesSample[:200] + "..." }
 	fmt.Printf("[CreateDPP-DEBUG] Vor PutState für Key: %s, DPP JSON (Ausschnitt): %s\n", logKey, logBytesSample)
 
 	errPut := ctx.GetStub().PutState(logKey, dppBytes)
@@ -265,6 +298,7 @@ func (c *DPPQualityContract) CreateDPP(ctx contractapi.TransactionContextInterfa
 }
 
 func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContextInterface, dppID string, qualityEntryJSON string, recordingSiteGLN string) error {
+    // ... (Implementierung wie in meiner letzten Antwort, die den clientProvidedOutcome respektiert) ...
 	fmt.Printf("[RecordQualityData-DEBUG] Entry für DPP: %s, SiteGLN: %s, QualityEntryJSON: %s\n", dppID, recordingSiteGLN, qualityEntryJSON)
 	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
 	if err != nil {
@@ -284,18 +318,13 @@ func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContex
 		return fmt.Errorf("QualityEntry JSON fehlerhaft: %v. JSON war: %s", err, qualityEntryJSON)
 	}
 
-	if qe.Timestamp == "" {
-		qe.Timestamp = time.Now().UTC().Format(time.RFC3339)
-	}
+	if qe.Timestamp == "" { qe.Timestamp = time.Now().UTC().Format(time.RFC3339) }
 	if qe.PerformingOrg == "" {
 		clientMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
-		if errClientMSPID != nil {
-			return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für QualityEntry: %v", errClientMSPID)
-		}
+		if errClientMSPID != nil { return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für QualityEntry: %v", errClientMSPID) }
 		qe.PerformingOrg = clientMSPID
 	}
-
-	// currentSpec immer suchen, da es für OpenMandatoryChecks benötigt wird
+	
 	var currentSpec *QualitySpecification
 	for i := range dpp.Specifications {
 		if dpp.Specifications[i].TestName == qe.TestName {
@@ -304,21 +333,17 @@ func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContex
 		}
 	}
 
-	// Prüfen, ob der Client einen finalen Outcome mitgeliefert hat
 	clientProvidedOutcomeIsFinal := qe.EvaluationOutcome == "PASS" ||
 								   strings.HasPrefix(qe.EvaluationOutcome, "FAIL") ||
 								   strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") ||
 								   qe.EvaluationOutcome == "INVALID_FORMAT" ||
-								   qe.EvaluationOutcome == "INFO_SENSOR_DATA" || // "INFO_SENSOR_DATA" als final ansehen
-								   qe.EvaluationOutcome == "INFO_NO_SPEC"   // "INFO_NO_SPEC" als final ansehen
-
+								   qe.EvaluationOutcome == "INFO_SENSOR_DATA" ||
+								   qe.EvaluationOutcome == "INFO_NO_SPEC"
 
 	if !clientProvidedOutcomeIsFinal {
 		fmt.Printf("[RecordQualityData-INFO] Kein finaler Outcome vom Client für Test '%s'. Führe Neubewertung durch.\n", qe.TestName)
 		qe.EvaluationOutcome = "NO_SPEC" 
 		qe.EvaluationComment = ""      
-		// currentSpec wurde bereits oben gesucht
-
 		if currentSpec != nil {
 			if currentSpec.IsNumeric {
 				resultVal, convErr := strconv.ParseFloat(qe.Result, 64)
@@ -332,13 +357,10 @@ func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContex
 					} else if resultVal > currentSpec.UpperLimit {
 						qe.EvaluationOutcome = "DEVIATION_HIGH"
 						qe.EvaluationComment = fmt.Sprintf("Wert %.4f über Grenzwert %.4f %s.", resultVal, currentSpec.UpperLimit, currentSpec.Unit)
-					} else {
-						qe.EvaluationOutcome = "PASS"
-					}
+					} else { qe.EvaluationOutcome = "PASS" }
 				}
-			} else { // String-basierter Test
-				if strings.EqualFold(qe.Result, currentSpec.ExpectedValue) {
-					qe.EvaluationOutcome = "PASS"
+			} else { 
+				if strings.EqualFold(qe.Result, currentSpec.ExpectedValue) { qe.EvaluationOutcome = "PASS"
 				} else {
 					qe.EvaluationOutcome = "FAIL"
 					qe.EvaluationComment = fmt.Sprintf("Erwartet: '%s', Erhalten: '%s'.", currentSpec.ExpectedValue, qe.Result)
@@ -350,27 +372,23 @@ func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContex
 			}
 		} else if qe.TestName != "" {
 			 qe.EvaluationOutcome = "INFO_NO_SPEC"
-			 qe.EvaluationComment = fmt.Sprintf("Keine Spezifikation für Test '%s' im DPP hinterlegt. Daten werden als informativ gespeichert.", qe.TestName)
+			 qe.EvaluationComment = fmt.Sprintf("Keine Spezifikation für Test '%s' im DPP hinterlegt. Daten als informativ gespeichert.", qe.TestName)
 		}
 	} else {
 		fmt.Printf("[RecordQualityData-INFO] Behalte vom Client übergebenen finalen EvaluationOutcome: '%s' für Test '%s'\n", qe.EvaluationOutcome, qe.TestName)
-		// Wenn Outcome vom Client kommt und Kommentar leer ist (und es kein reiner PASS/INFO ist), ggf. generischen Kommentar setzen
 		if qe.EvaluationComment == "" && qe.EvaluationOutcome != "PASS" && qe.EvaluationOutcome != "INFO_SENSOR_DATA" && qe.EvaluationOutcome != "INFO_NO_SPEC" {
 			qe.EvaluationComment = "Outcome vom Integrationslayer/Oracle oder externen System gesetzt."
 		}
 	}
-
 	dpp.Quality = append(dpp.Quality, qe)
 	fmt.Printf("[RecordQualityData-DEBUG] Qualitätseintrag hinzugefügt: %+v\n", qe)
 
 	now := time.Now()
 	epcisDisposition := "urn:epcglobal:cbv:disp:active"
-	if qe.EvaluationOutcome == "PASS" {
-		epcisDisposition = "urn:epcglobal:cbv:disp:conformant"
+	if qe.EvaluationOutcome == "PASS" { epcisDisposition = "urn:epcglobal:cbv:disp:conformant"
 	} else if qe.EvaluationOutcome == "FAIL" || qe.EvaluationOutcome == "INVALID_FORMAT" || strings.HasPrefix(qe.EvaluationOutcome, "DEVIATION") {
 		epcisDisposition = "urn:epcglobal:cbv:disp:non_conformant"
 	}
-
 	qcEvent := EPCISEvent{
 		EventID:             fmt.Sprintf("evt-qc-%s-%d", strings.ReplaceAll(strings.ReplaceAll(qe.TestName, " ", "_"), "/", "_"), now.UnixNano()),
 		EventType:           "ObjectEvent", EventTime: now.UTC().Format(time.RFC3339), EventTimeZoneOffset: tzOffset(),
@@ -379,23 +397,16 @@ func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContex
 		Extensions:          map[string]interface{}{"recordedQualityData": qe},
 	}
 	dpp.EPCISEvents = append(dpp.EPCISEvents, qcEvent)
-
 	if currentSpec != nil && currentSpec.IsMandatory && qe.EvaluationOutcome == "PASS" {
-		var newOpenChecks []string
-		foundAndRemoved := false
+		var newOpenChecks []string; foundAndRemoved := false
 		for _, checkName := range dpp.OpenMandatoryChecks {
-			if checkName == qe.TestName {
-				foundAndRemoved = true
-			} else {
-				newOpenChecks = append(newOpenChecks, checkName)
-			}
+			if checkName == qe.TestName { foundAndRemoved = true
+			} else { newOpenChecks = append(newOpenChecks, checkName) }
 		}
-		if foundAndRemoved {
-			dpp.OpenMandatoryChecks = newOpenChecks
+		if foundAndRemoved { dpp.OpenMandatoryChecks = newOpenChecks
 			fmt.Printf("[RecordQualityData-DEBUG] Mandatorischer Check '%s' als PASS erfüllt und entfernt.\n", qe.TestName)
 		}
 	}
-	
 	dpp.recalculateOverallStatus()
 	fmt.Printf("[RecordQualityData-INFO] Neuer Status für DPP %s nach recalculateOverallStatus: %s\n", dppID, dpp.Status)
 	fmt.Printf("[RecordQualityData-DEBUG] Verbleibende offene mandatorische Checks: %v\n", dpp.OpenMandatoryChecks)
@@ -411,26 +422,94 @@ func (c *DPPQualityContract) RecordQualityData(ctx contractapi.TransactionContex
 		ctx.GetStub().SetEvent("QualityAlert", alertBytes)
 		fmt.Printf("[RecordQualityData-INFO] QualityAlert Event für DPP %s gesendet.\n", dppID)
 	}
+	updatedDppBytes, errMarshal := json.Marshal(dpp)
+	if errMarshal != nil { return fmt.Errorf("Fehler beim Marshalling des aktualisierten DPP %s: %v", dppID, errMarshal) }
+	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
+}
+
+// NEUE FUNKTION: AddTransportUpdate
+func (c *DPPQualityContract) AddTransportUpdate(ctx contractapi.TransactionContextInterface, dppID string, transportUpdateEntryJSON string, siteGLN string) error {
+	fmt.Printf("[AddTransportUpdate-DEBUG] Entry für DPP: %s, SiteGLN: %s, transportUpdateEntryJSON: %s\n", dppID, siteGLN, transportUpdateEntryJSON)
+
+	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
+	if err != nil {
+		return fmt.Errorf("Fehler beim Lesen von DPP %s: %v", dppID, err)
+	}
+	if dppBytes == nil {
+		return fmt.Errorf("DPP %s nicht gefunden", dppID)
+	}
+
+	var dpp DPP
+	if err := json.Unmarshal(dppBytes, &dpp); err != nil {
+		return fmt.Errorf("Fehler beim Unmarshalling von DPP %s: %v", dppID, err)
+	}
+
+	var transportEntry TransportConditionLogEntry
+	if err := json.Unmarshal([]byte(transportUpdateEntryJSON), &transportEntry); err != nil {
+		return fmt.Errorf("TransportUpdateEntry JSON fehlerhaft: %v. JSON war: %s", err, transportUpdateEntryJSON)
+	}
+
+	if transportEntry.Timestamp == "" {
+		transportEntry.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	// PerformingOrg wird hier nicht direkt gesetzt, da es sich um einen Transportlog handelt,
+	// der ggf. vom Logistikpartner oder einem automatisierten System kommt.
+	// Der 'siteGLN' kann den Ort der Erfassung/des Updates repräsentieren.
+
+	dpp.TransportLog = append(dpp.TransportLog, transportEntry)
+	fmt.Printf("[AddTransportUpdate-DEBUG] TransportLog Eintrag hinzugefügt: %+v\n", transportEntry)
+
+	// EPCIS Event für den Transport Log Eintrag (z.B. als Observation Event)
+	now := time.Now()
+	epcisDispositionForTransport := "urn:epcglobal:cbv:disp:in_transit" // oder "active" wenn es ein Sensor-Ping ist
+	if strings.Contains(transportEntry.Status, "ALERT") {
+		epcisDispositionForTransport = "urn:epcglobal:cbv:disp:non_conformant_in_transit" // Beispiel für einen spezifischeren Status
+	}
+
+	transportEvt := EPCISEvent{
+		EventID:             fmt.Sprintf("evt-transportlog-%s-%d", strings.ReplaceAll(dpp.GS1Key, ":", "_"), now.UnixNano()),
+		EventType:           "ObjectEvent",
+		EventTime:           transportEntry.Timestamp, // Zeitstempel des Transport-Events
+		EventTimeZoneOffset: tzOffset(),
+		BizStep:             "urn:epcglobal:cbv:bizstep:transporting", // Oder spezifischer je nach LogType
+		Action:              "OBSERVE",
+		EPCList:             []string{dpp.GS1Key},
+		Disposition:         epcisDispositionForTransport,
+		ReadPoint:           sgln(siteGLN), // Ort, an dem das Update erfasst/verarbeitet wurde
+		BizLocation:         sgln(siteGLN), // Kann auch der aktuelle Standort sein, wenn bekannt
+		Extensions:          map[string]interface{}{"transportConditionUpdate": transportEntry},
+	}
+	dpp.EPCISEvents = append(dpp.EPCISEvents, transportEvt)
+
+	// Status anpassen, wenn ein Alert im TransportLog vorliegt
+	if strings.Contains(transportEntry.Status, "ALERT") {
+		if dpp.Status == "InTransitTo_Org4MSP" { // Annahme: Org4 ist der Empfänger
+			dpp.Status = "InTransitTo_Org4MSP_TransportAlert"
+		} else if strings.HasPrefix(dpp.Status, "InTransitTo_") && !strings.HasSuffix(dpp.Status, "_TransportAlert") {
+			// Generischer, falls der Empfänger nicht explizit Org4 ist oder der Status schon anders ist
+			dpp.Status = dpp.Status + "_TransportAlert"
+		}
+		fmt.Printf("[AddTransportUpdate-INFO] Transport-Alert für DPP %s gesetzt. Neuer Status: %s\n", dppID, dpp.Status)
+	}
+	// recalculateOverallStatus wird hier nicht direkt gerufen, da Transport-Alerts den "Released"-Status nicht unbedingt aufheben,
+	// sondern ergänzen. Die finale Entscheidung trifft der Empfänger.
 
 	updatedDppBytes, errMarshal := json.Marshal(dpp)
 	if errMarshal != nil {
-		return fmt.Errorf("Fehler beim Marshalling des aktualisierten DPP %s: %v", dppID, errMarshal)
+		return fmt.Errorf("Fehler beim Marshalling des aktualisierten DPP %s nach Transport-Update: %v", dppID, errMarshal)
 	}
 	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
 }
+
 
 func (c *DPPQualityContract) RecordTransformation(ctx contractapi.TransactionContextInterface,
 	outputDppID, outputGS1Key, outputProductTypeID string,
 	currentGLN string, batch, productionDate string,
 	inputDPPIDsJSON string, outputSpecificationsJSON string,
 	initialQualityEntryJSON string) error {
-
+    // ... (Implementierung wie in meiner letzten Antwort, die CreateDPP aufruft und das Objekt verwendet) ...
 	fmt.Printf("[RecordTransformation-DEBUG] Entry: outputDppID=%s, outputGS1Key=%s, outputProductTypeID=%s, currentGLN=%s, batch=%s, productionDate=%s\n", outputDppID, outputGS1Key, outputProductTypeID, currentGLN, batch, productionDate)
 	
-	/* // MINITEST auskommentiert
-	// ... (Minitest code) ...
-	*/
-
 	fmt.Printf("[RecordTransformation-DEBUG] inputDPPIDsJSON: %s\n", inputDPPIDsJSON)
 	fmt.Printf("[RecordTransformation-DEBUG] outputSpecificationsJSON: %s\n", outputSpecificationsJSON)
 	fmt.Printf("[RecordTransformation-DEBUG] initialQualityEntryJSON: %s\n", initialQualityEntryJSON)
@@ -638,8 +717,9 @@ func (c *DPPQualityContract) RecordTransformation(ctx contractapi.TransactionCon
 }
 
 func (c *DPPQualityContract) TransferDPP(ctx contractapi.TransactionContextInterface, dppID, newOwnerMSP, shipperGLN string) error {
+	fmt.Printf("[TransferDPP-DEBUG] Entry für DPP: %s, an: %s, von GLN: %s\n", dppID, newOwnerMSP, shipperGLN)
 	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
-	if err != nil {	return err }
+	if err != nil {	return fmt.Errorf("Fehler beim Lesen von DPP %s: %v", dppID, err) }
 	if dppBytes == nil { return fmt.Errorf("DPP %s nicht gefunden", dppID) }
 	var dpp DPP
 	if errUnmarshal := json.Unmarshal(dppBytes, &dpp); errUnmarshal != nil {
@@ -653,31 +733,41 @@ func (c *DPPQualityContract) TransferDPP(ctx contractapi.TransactionContextInter
 	}
 	if dpp.OwnerOrg == newOwnerMSP { return errors.New("neuer Eigentümer ist identisch mit aktuellem Eigentümer")	}
 
-	// ACHTUNG: Hier die Logik anpassen, wenn ein DPP mit "Alert" oder "Deviation" trotzdem transferierbar sein soll.
-	// Aktuell nur "Released" und "ReleasedWithDeviations".
-	if dpp.Status != "Released" && dpp.Status != "ReleasedWithDeviations" && !strings.Contains(dpp.Status, "Alert") /* Beispiel: Erlaube Transfer trotz Alert */ {
-		return fmt.Errorf("DPP %s (Status: %s) ist nicht für den Transfer freigegeben. Erlaubt sind 'Released', 'ReleasedWithDeviations' oder Status mit 'Alert'.", dppID, dpp.Status)
+	// Erlaube Transfer, wenn "Released" oder "ReleasedWithDeviations" oder wenn ein TransportAlert vorliegt
+	// Ein "Blocked" DPP soll nicht transferiert werden.
+	isTransferable := dpp.Status == "Released" || dpp.Status == "ReleasedWithDeviations" || strings.Contains(dpp.Status, "TransportAlert")
+	if !isTransferable || dpp.Status == "Blocked" {
+		return fmt.Errorf("DPP %s (Status: %s) ist nicht für den Transfer freigegeben oder ist blockiert.", dppID, dpp.Status)
 	}
 
+	originalStatusBeforeTransportAlert := dpp.Status // Behalte den Status, falls es ein Alert ist
+	
 	now := time.Now()
 	shipEvt := EPCISEvent{
 		EventID:             fmt.Sprintf("evt-ship-%s-%d", strings.ReplaceAll(dpp.GS1Key, ":", "_"), now.UnixNano()),
 		EventType:           "ObjectEvent", EventTime: now.UTC().Format(time.RFC3339), EventTimeZoneOffset: tzOffset(),
 		BizStep:             "urn:epcglobal:cbv:bizstep:shipping", Action: "OBSERVE", EPCList: []string{dpp.GS1Key},
-		Disposition:         "urn:epcglobal:cbv:disp:in_transit", ReadPoint: sgln(shipperGLN), BizLocation: "",
-		Extensions:          map[string]interface{}{"intendedRecipientMSP": newOwnerMSP},
+		Disposition:         "urn:epcglobal:cbv:disp:in_transit", ReadPoint: sgln(shipperGLN), BizLocation: "", 
+		Extensions:          map[string]interface{}{"intendedRecipientMSP": newOwnerMSP, "originalStatus": originalStatusBeforeTransportAlert},
 	}
 	dpp.EPCISEvents = append(dpp.EPCISEvents, shipEvt)
 	dpp.OwnerOrg = newOwnerMSP
-	dpp.Status = fmt.Sprintf("InTransitTo_%s", newOwnerMSP)
+	// Wenn ein TransportAlert vorliegt, diesen im Status beibehalten, sonst normal InTransitTo setzen
+	if strings.Contains(originalStatusBeforeTransportAlert, "_TransportAlert") {
+		dpp.Status = fmt.Sprintf("InTransitTo_%s_TransportAlert", newOwnerMSP) // Behalte den Alert-Typ
+	} else {
+		dpp.Status = fmt.Sprintf("InTransitTo_%s", newOwnerMSP)
+	}
+	fmt.Printf("[TransferDPP-INFO] DPP %s an %s transferiert. Neuer Status: %s\n", dppID, newOwnerMSP, dpp.Status)
 
 	updatedDppBytes, _ := json.Marshal(dpp)
 	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
 }
 
 func (c *DPPQualityContract) AcknowledgeReceiptAndRecordInspection(ctx contractapi.TransactionContextInterface, dppID, recipientGLN string, incomingInspectionJSON string) error {
+	fmt.Printf("[AcknowledgeReceipt-DEBUG] Entry für DPP: %s, EmpfängerGLN: %s\n", dppID, recipientGLN)
 	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
-	if err != nil { return err }
+	if err != nil { return fmt.Errorf("Fehler beim Lesen von DPP %s: %v", dppID, err) }
 	if dppBytes == nil { return fmt.Errorf("DPP %s nicht gefunden", dppID) }
 	var dpp DPP
 	if errUnmarshal := json.Unmarshal(dppBytes, &dpp); errUnmarshal != nil {
@@ -687,20 +777,22 @@ func (c *DPPQualityContract) AcknowledgeReceiptAndRecordInspection(ctx contracta
 	recipientMSPID, errClientMSPID := ctx.GetClientIdentity().GetMSPID()
 	if errClientMSPID != nil { return fmt.Errorf("Fehler beim Ermitteln der Client MSPID für Acknowledge: %v", errClientMSPID) }
 
+	// Der Status muss "InTransitTo_EMPFÄNGERMSPID" sein, potenziell mit Suffix wie "_TransportAlert"
 	expectedStatusPrefix := "InTransitTo_" + recipientMSPID
-	// Erlaube auch den Empfang, wenn ein Alert im Status ist
-	if dpp.OwnerOrg != recipientMSPID || !strings.HasPrefix(dpp.Status, "InTransitTo_") || !strings.Contains(dpp.Status, recipientMSPID) {
-		return fmt.Errorf("DPP %s ist nicht für Empfang durch %s vorgesehen oder hat falschen Status/Owner (Status: %s, Owner: %s, Erwartet Status-Präfix: %s, Erwartet Owner: %s)", dppID, recipientMSPID, dpp.Status, dpp.OwnerOrg, expectedStatusPrefix, recipientMSPID)
+	if dpp.OwnerOrg != recipientMSPID || !strings.HasPrefix(dpp.Status, expectedStatusPrefix) {
+		return fmt.Errorf("DPP %s ist nicht korrekt für Empfang durch %s vorgesehen. Aktuell: Owner %s, Status %s. Erwartet Owner %s und Status-Präfix %s",
+			dppID, recipientMSPID, dpp.OwnerOrg, dpp.Status, recipientMSPID, expectedStatusPrefix)
 	}
 
-	// Status nur ändern, wenn kein Alert vorliegt, ansonsten Alert beibehalten
-	if !strings.Contains(dpp.Status, "Alert") {
-		dpp.Status = "AcceptedAtRecipient"
-	} else {
-		// Beispiel: "InTransitTo_OrgD_TempAlert" -> "AcceptedAtRecipient_TempAlert"
-		dpp.Status = strings.Replace(dpp.Status, "InTransitTo_", "AcceptedAtRecipient_", 1)
-	}
+	// Den Suffix (z.B. _TransportAlert) vom InTransitTo_ Status übernehmen für den Accepted-Status
+	statusSuffix := strings.TrimPrefix(dpp.Status, expectedStatusPrefix) // z.B. "" oder "_TransportAlert"
+	dpp.Status = "AcceptedAtRecipient" + statusSuffix
+	
 	ackDisposition := "urn:epcglobal:cbv:disp:in_possession"
+	if strings.Contains(dpp.Status, "Alert") { // Wenn im Status ein Alert ist (auch nach Akzeptanz)
+		ackDisposition = "urn:epcglobal:cbv:disp:in_possession_non_conformant" // Beispiel
+	}
+
 
 	now := time.Now()
 	ackEvt := EPCISEvent{
@@ -719,32 +811,41 @@ func (c *DPPQualityContract) AcknowledgeReceiptAndRecordInspection(ctx contracta
 		} else {
 			if inspQE.Timestamp == "" { inspQE.Timestamp = time.Now().UTC().Format(time.RFC3339) }
 			if inspQE.PerformingOrg == "" { inspQE.PerformingOrg = recipientMSPID }
-            if inspQE.EvaluationOutcome == "" {
-                 inspQE.EvaluationOutcome = "INCOMING_INSPECTION_DATA" 
-            }
+            if inspQE.EvaluationOutcome == "" { inspQE.EvaluationOutcome = "INCOMING_INSPECTION_DATA" }
+			
+			// Hier könnte eine volle Bewertung der incomingInspection stattfinden, wenn Spezifikationen für diese Tests im DPP existieren.
+			// Für den Prototyp wird der vom Client gelieferte Outcome (oder der Default) übernommen.
 			dpp.Quality = append(dpp.Quality, inspQE)
+			fmt.Printf("[Acknowledge-DEBUG] Eingangsprüfungs-Qualitätseintrag hinzugefügt: %+v\n", inspQE)
 
 			inspTime := time.Now()
+			inspEventDisposition := "urn:epcglobal:cbv:disp:active" // Default
+			if inspQE.EvaluationOutcome == "PASS" { inspEventDisposition = "urn:epcglobal:cbv:disp:conformant"
+			} else if inspQE.EvaluationOutcome == "FAIL" || strings.HasPrefix(inspQE.EvaluationOutcome, "DEVIATION") || inspQE.EvaluationOutcome == "INVALID_FORMAT" {
+				inspEventDisposition = "urn:epcglobal:cbv:disp:non_conformant"
+			}
+
 			inspEvent := EPCISEvent{
 				EventID:             fmt.Sprintf("evt-insp-%s-%s-%d", recipientMSPID, strings.ReplaceAll(dpp.GS1Key, ":", "_"), inspTime.UnixNano()),
 				EventType:           "ObjectEvent", EventTime: inspTime.UTC().Format(time.RFC3339), EventTimeZoneOffset: tzOffset(),
 				BizStep:             "urn:epcglobal:cbv:bizstep:inspecting", Action: "OBSERVE", EPCList: []string{dpp.GS1Key},
-				Disposition:         "urn:epcglobal:cbv:disp:active", 
-				ReadPoint:           sgln(recipientGLN), BizLocation: sgln(recipientGLN),
+				Disposition:         inspEventDisposition, ReadPoint: sgln(recipientGLN), BizLocation: sgln(recipientGLN),
 				Extensions:          map[string]interface{}{"inspectionDataByRecipient": inspQE},
 			}
 			dpp.EPCISEvents = append(dpp.EPCISEvents, inspEvent)
-			// Neuberechnung des Status nach Eingangsprüfung, falls diese Specs hat oder mandatorisch war
-			// Für den Prototyp wird hier recalculateOverallStatus den Status nicht ändern, wenn er schon "Accepted..." ist.
-			// dpp.recalculateOverallStatus() // Normalerweise würde dies den Status nicht von AcceptedAtRecipient ändern
+			// Neuberechnung des Status nach Eingangsprüfung, falls relevant.
+			// Die recalculateOverallStatus Funktion oben wird den "AcceptedAtRecipient..." Status nicht überschreiben,
+			// es sei denn, die Eingangsprüfung führt zu einem "FAIL" und ist mandatorisch (was hier nicht der Fall ist).
+			// dpp.recalculateOverallStatus() 
 		}
 	}
-
+	fmt.Printf("[Acknowledge-INFO] DPP %s Empfang bestätigt. Neuer Status: %s\n", dppID, dpp.Status)
 	updatedDppBytes, _ := json.Marshal(dpp)
 	return ctx.GetStub().PutState(dppPrefix+dppID, updatedDppBytes)
 }
 
 func (c *DPPQualityContract) QueryDPP(ctx contractapi.TransactionContextInterface, dppID string) (*DPP, error) {
+    // ... (Implementierung wie in deiner funktionierenden Version) ...
 	fmt.Printf("[QueryDPP-DEBUG] Query für dppID: %s\n", dppID)
 	dppBytes, err := ctx.GetStub().GetState(dppPrefix + dppID)
 	if err != nil {
