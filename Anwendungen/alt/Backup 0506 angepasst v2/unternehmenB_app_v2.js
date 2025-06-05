@@ -1,11 +1,9 @@
-// unternehmenB_app.js
 'use strict';
 
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
 const path = require('path');
 const fs = require('fs');
-const fabricUtils = require('./fabricUtils.js');
 
 const ccpPathOrg2 = path.resolve(
     __dirname, '..', '..', 'fabric-samples', 'test-network',
@@ -24,12 +22,84 @@ const GS1_FIRMEN_PREFIX_B = '4098765';
 const STANDARD_PRODUKT_TYP_B = 'GLASFASER_GF30';
 
 const GLASFASER_TEST_NAME_KONST = "Glasfaser-Gewichtsanteil";
-const MFI_TEST_NAME_KONST_B = "Melt Flow Index (230 GradC / 2,16 kg)";
+const MFI_TEST_NAME_KONST_B = "Melt Flow Index (230 GradC / 2,16 kg)"; // Eindeutiger für B falls nötig
 const RESTFEUCHTE_TEST_NAME_KONST = "Restfeuchte";
+
 
 function erstelleSgtin(prefix, artikelRef, seriennummer) {
     return `urn:epc:id:sgtin:${prefix}.${artikelRef}.${seriennummer}`;
 }
+
+async function pruefeWallet(wallet, identLabel) {
+    return await wallet.get(identLabel);
+}
+
+async function erstelleAdminOrg(wallet, caClient, mspId, adminUserId) {
+    try {
+        if (await pruefeWallet(wallet, adminUserId)) {
+            console.log(`Admin "${adminUserId}" existiert in Wallet B`);
+            return;
+        }
+        const enrollment = await caClient.enroll({ enrollmentID: 'admin', enrollmentSecret: 'adminpw' });
+        const x509Ident = {
+            credentials: { certificate: enrollment.certificate, privateKey: enrollment.key.toBytes(), },
+            mspId: mspId, type: 'X.509',
+        };
+        await wallet.put(adminUserId, x509Ident);
+        console.log(`Admin "${adminUserId}" fuer Wallet B registriert`);
+    } catch (error) {
+        console.error(`Fehler Admin Erstellung B: ${error.message}`);
+        throw error;
+    }
+}
+
+async function erstelleBenutzerOrg(wallet, caClient, mspId, userId, adminUserId, affiliation) {
+    try {
+        if (await pruefeWallet(wallet, userId)) {
+            console.log(`Benutzer "${userId}" existiert in Wallet B`);
+            return;
+        }
+        const adminIdent = await wallet.get(adminUserId);
+        if (!adminIdent) {
+            throw new Error(`Admin "${adminUserId}" nicht in Wallet B gefunden`);
+        }
+        const provider = wallet.getProviderRegistry().getProvider(adminIdent.type);
+        const adminUser = await provider.getUserContext(adminIdent, adminUserId);
+
+        const secret = await caClient.register({ affiliation, enrollmentID: userId, role: 'client' }, adminUser);
+        const enrollment = await caClient.enroll({ enrollmentID: userId, enrollmentSecret: secret });
+        const x509Ident = {
+            credentials: { certificate: enrollment.certificate, privateKey: enrollment.key.toBytes() },
+            mspId: mspId, type: 'X.509',
+        };
+        await wallet.put(userId, x509Ident);
+        console.log(`Benutzer "${userId}" fuer Wallet B registriert`);
+    } catch (error) {
+        console.error(`Fehler Benutzer Erstellung B: ${error.message}`);
+        throw error;
+    }
+}
+
+async function trenneGateway(gateway) {
+    if (gateway) {
+        await gateway.disconnect();
+    }
+}
+
+async function abfrageUndLogDPP(contract, dppId, kontextNachricht) {
+    console.log(`\n--- INFO ${kontextNachricht} - Status ${dppId} ---`);
+    const dppBytes = await contract.evaluateTransaction('DPPAbfragen', dppId);
+    const dpp = JSON.parse(dppBytes.toString());
+    console.log(`Status ${dpp.status}`);
+    if (dpp.offenePflichtpruefungen && dpp.offenePflichtpruefungen.length > 0) {
+        console.log(`Offene Pflichtpruefungen ${dpp.offenePflichtpruefungen.join(', ')}`);
+    }
+    if (dpp.status === "Gesperrt") {
+        console.error(`ACHTUNG DPP ${dppId} ist gesperrt!`);
+    }
+    return dpp;
+}
+
 
 async function main() {
     let gateway;
@@ -45,8 +115,8 @@ async function main() {
         const wallet = await Wallets.newFileSystemWallet(walletPfadB);
         console.log(`Wallet Pfad B ${walletPfadB}`);
 
-        await fabricUtils.erstelleAdmin(wallet, ca, MSP_ID_ORG2, ADMIN_ID_ORG2, 'B');
-        await fabricUtils.erstelleBenutzer(wallet, ca, MSP_ID_ORG2, APP_USER_ID_ORG2, ADMIN_ID_ORG2, 'org2.department1', 'B');
+        await erstelleAdminOrg(wallet, ca, MSP_ID_ORG2, ADMIN_ID_ORG2);
+        await erstelleBenutzerOrg(wallet, ca, MSP_ID_ORG2, APP_USER_ID_ORG2, ADMIN_ID_ORG2, 'org2.department1');
 
         gateway = new Gateway();
         await gateway.connect(ccp, {
@@ -83,7 +153,7 @@ async function main() {
             spezifikationenB_JSON
         );
         console.log(`DPP ${dppIdB} angelegt (GS1 ${gs1KeyB})`);
-        let dppStatus = await fabricUtils.abfrageUndLogDPP(contract, dppIdB, "Initial nach ErstellenDPP");
+        let dppStatus = await abfrageUndLogDPP(contract, dppIdB, "Initial nach ErstellenDPP");
 
         const testDatenGF = {
             standardName: GLASFASER_TEST_NAME_KONST,
@@ -91,8 +161,6 @@ async function main() {
             einheit: 'wt-%',
             systemId: 'B-FIBERTEST',
             zustaendiger: 'PrüferB',
-			offChainProtokoll: "",
-			dateiHash: "",         
         };
         console.log(`\n--> B AufzeichnenTestergebnisse (Glasfaser) DPP ${dppIdB}`);
         await contract.submitTransaction('AufzeichnenTestergebnisse',
@@ -101,7 +169,7 @@ async function main() {
             GLN_ORG_B
         );
         console.log('GF-Anteil gespeichert');
-        dppStatus = await fabricUtils.abfrageUndLogDPP(contract, dppIdB, "Nach GF-Test");
+        dppStatus = await abfrageUndLogDPP(contract, dppIdB, "Nach GF-Test");
 
         const testDatenMfi = {
             standardName: MFI_TEST_NAME_KONST_B,
@@ -109,8 +177,6 @@ async function main() {
             einheit: 'g/10 min',
             systemId: 'B-MFI',
             zustaendiger: 'PrüferB',
-			offChainProtokoll: "", 
-			dateiHash: "",      
         };
         console.log(`\n--> B AufzeichnenTestergebnisse (MFI) DPP ${dppIdB}`);
         await contract.submitTransaction('AufzeichnenTestergebnisse',
@@ -119,7 +185,7 @@ async function main() {
             GLN_ORG_B
         );
         console.log('MFI gespeichert');
-        dppStatus = await fabricUtils.abfrageUndLogDPP(contract, dppIdB, "Nach MFI-Test");
+        dppStatus = await abfrageUndLogDPP(contract, dppIdB, "Nach MFI-Test");
 
         if(dppStatus.status === "Freigegeben") {
             console.log("Alle Pflichtpruefungen bestanden DPP freigegeben");
@@ -138,7 +204,7 @@ async function main() {
                 GLN_ORG_B
             );
             console.log(`Transfer ${dppIdB} an ${zielOrgC_MSP} initiiert`);
-            await fabricUtils.abfrageUndLogDPP(contract, dppIdB, "Nach TransferInitiative an C durch B");
+            await abfrageUndLogDPP(contract, dppIdB, "Nach TransferInitiative an C durch B");
         } else {
             console.error(`ACHTUNG DPP ${dppIdB} Status ${dppFinal.status} und kann NICHT transferiert werden`);
         }
@@ -150,7 +216,7 @@ async function main() {
         process.exit(1);
     } finally {
         if (gateway) {
-            await fabricUtils.trenneGateway(gateway);
+            await trenneGateway(gateway);
             console.log('\nB Gateway getrennt – Unternehmen B Demo beendet');
         }
     }
