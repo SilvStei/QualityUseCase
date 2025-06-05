@@ -56,7 +56,7 @@ async function main() {
         });
 
         const network = await gateway.getNetwork('mychannel');
-        const contract = network.getContract('dpp_quality_go_v2');
+        const contract = network.getContract('dpp_quality');
 
         const jetzt = new Date();
         const dppIdB = `DPP_B_${jetzt.getTime()}`;

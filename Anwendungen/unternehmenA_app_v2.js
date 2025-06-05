@@ -59,7 +59,7 @@ async function main() {
             discovery: { enabled: true, asLocalhost: true }
         });
         const network = await gateway.getNetwork('mychannel');
-        const contract = network.getContract('dpp_quality_go_v2');
+        const contract = network.getContract('dpp_quality');
 
         const uniqueIdPartA = Date.now();
         const dppIdA = `DPP_A_${uniqueIdPartA}`;

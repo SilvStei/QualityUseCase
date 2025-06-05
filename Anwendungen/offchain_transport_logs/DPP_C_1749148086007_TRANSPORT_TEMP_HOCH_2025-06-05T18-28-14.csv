@@ -1,0 +1,16 @@
+zeitstempel,parametertyp,wert,einheit,zustand
+2025-06-05T18:28:14.368Z,Temperatur,12.6,GradC,OK
+2025-06-05T18:33:14.368Z,FeuchtigkeitRelativ,51.8,%,OK
+2025-06-05T18:38:14.368Z,Erschuetterung,0.67,g,OK
+2025-06-05T20:28:14.368Z,Temperatur,28.3,GradC,OK
+2025-06-05T20:33:14.368Z,FeuchtigkeitRelativ,40.6,%,OK
+2025-06-05T20:38:14.368Z,Erschuetterung,0.14,g,OK
+2025-06-05T22:28:14.368Z,Temperatur,17.4,GradC,OK
+2025-06-05T22:33:14.368Z,FeuchtigkeitRelativ,46.2,%,OK
+2025-06-05T22:38:14.368Z,Erschuetterung,0.55,g,OK
+2025-06-06T00:28:14.368Z,Temperatur,36.5,GradC,ALARM
+2025-06-06T00:33:14.368Z,FeuchtigkeitRelativ,44.3,%,OK
+2025-06-06T00:38:14.368Z,Erschuetterung,0.39,g,OK
+2025-06-06T02:28:14.368Z,Temperatur,5.4,GradC,OK
+2025-06-06T02:33:14.368Z,FeuchtigkeitRelativ,51.5,%,OK
+2025-06-06T02:38:14.368Z,Erschuetterung,0.30,g,OK

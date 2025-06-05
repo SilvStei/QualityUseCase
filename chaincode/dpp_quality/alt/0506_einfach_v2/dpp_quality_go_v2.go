@@ -53,9 +53,9 @@ type EPCISEvent struct {
 	EventTime           string                 `json:"eventTime"`
 	EventTimeZoneOffset string                 `json:"eventTimeZoneOffset"`
 	BizStep             string                 `json:"bizStep"`
-	Action              string                 `json:"action,omitempty"`
-	EPCList             []string               `json:"epcList,omitempty"` // Kann omitempty bleiben, wenn wirklich optional
-	Disposition         string                 `json:"disposition,omitempty"`
+	Action              string                 `json:"action"`
+	EPCList             []string               `json:"epcList"` // Kann omitempty bleiben, wenn wirklich optional
+	Disposition         string                 `json:"disposition"`
 	InputEPCList        []string               `json:"inputEPCList"`    // omitempty entfernt
 	OutputEPCList       []string               `json:"outputEPCList"`   // omitempty entfernt
 	ReadPoint           string                 `json:"readPoint,omitempty"`
@@ -332,6 +332,9 @@ func (c *DPPQualityContract) TransformationAufzeichnen(ctx contractapi.Transacti
 		EventType:           "TransformationEvent", EventTime: now.UTC().Format(time.RFC3339), EventTimeZoneOffset: tzOffset(),
 		BizStep:             "urn:epcglobal:cbv:bizstep:transforming", InputEPCList: inputGS1KeysForEvent, OutputEPCList: []string{outputGS1Key},
 		ReadPoint:           sgln(currentGLN), BizLocation: sgln(currentGLN), Extensions: make(map[string]interface{}),
+		Action:              "", // Oder ein passender Wert, falls definiert
+		Disposition:         "", // Oder ein passender Wert, z.B. für die Output-Produkte
+		EPCList:             []string{}, // TransformationEvents haben Input/Output, EPCList ist eher für ObjectEvents
 	}
 	if initialTestResultJSON != "" && initialTestResultJSON != "{}" {
 		var initialTE TestErgebnis

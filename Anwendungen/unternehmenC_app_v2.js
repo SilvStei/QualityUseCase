@@ -75,7 +75,7 @@ async function main() {
             discovery: { enabled: true, asLocalhost: true }
         });
         const network = await gateway.getNetwork('mychannel');
-        const contract = network.getContract('dpp_quality_go_v2');
+        const contract = network.getContract('dpp_quality');
 
         console.log(`\n--> C Empfange DPPs von A und B`);
         const inputDPPIDs = [dppIdVonA, dppIdVonB];
@@ -146,6 +146,30 @@ async function main() {
         };
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(farbTestDatenC), GLN_ORG_C);
         console.log(`Farb-Daten gespeichert`);
+		console.log(`\n--> C AufzeichnenTestergebnisse (${COMPOUND_DICHTE_TEST_NAME}) DPP ${dppIdC}`);
+		const dichteTestDatenC = {
+		standardName: COMPOUND_DICHTE_TEST_NAME,
+		ergebnis: "1.09",          // aktueller Messwert eintragen
+		einheit: "g/cm3",
+		systemId: "FINAL_COMPOUND_QA",
+		zustaendiger: "PrüferC",
+		offChainProtokoll: "",
+		dateiHash: ""
+		};
+		await contract.submitTransaction(
+		'AufzeichnenTestergebnisse',
+		dppIdC,
+		JSON.stringify(dichteTestDatenC),
+		GLN_ORG_C
+		);
+		console.log("Dichte-Daten gespeichert");
+
+		let dppCObj = await fabricUtils.abfrageUndLogDPP(
+		contract,
+		dppIdC,
+		`Status Compound DPP ${dppIdC} nach Dichte-Prüfung`,
+		true
+		);
         let dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Farbpruefung`, true);
         console.log(`\nCompound-DPP C ${dppIdC} vor Transport-Log\n`, JSON.stringify(dppCObj, null, 2));
 

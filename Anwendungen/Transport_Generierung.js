@@ -29,7 +29,7 @@ function generiereTransportLogs(dppId, transportProfil) {
     const logs = [];
     const startZeit = new Date();
 
-    for (let i = 0; i < ANZAHL_LOG_EINTRAGE_PRO_TYP; i++) {
+    for (let i = 0; i < ANZAHL_LOG_EINTRAGE; i++) {
         const zeitpunkt = new Date(startZeit.getTime() + i * 2 * 3600000);
 
         let tempWert = TEMP_NORMAL_MIN + Math.random() * (TEMP_NORMAL_MAX - TEMP_NORMAL_MIN);

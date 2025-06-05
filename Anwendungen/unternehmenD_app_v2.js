@@ -47,7 +47,7 @@ async function main() {
             wallet, identity: APP_USER_ID_ORG4, discovery: { enabled: true, asLocalhost: true }
         });
         const network = await gateway.getNetwork('mychannel');
-        const contract = network.getContract('dpp_quality_go_v2');
+        const contract = network.getContract('dpp_quality');
 
         console.log(`\n--> D DPPAbfragen ${dppIdVonC} (empfangen von C)`);
         let dpp = await fabricUtils.abfrageUndLogDPP(contract, dppIdVonC, `Status ${dppIdVonC} bei Ankunft D`, true);
@@ -58,22 +58,25 @@ async function main() {
         }
         console.log(`DPP ${dppIdVonC} korrekt an ${MSP_ID_ORG4} unterwegs`);
 
-        if (dpp.transportLog && dpp.transportLog.length > 0) {
-            console.log(`\n---> D Empfangener Transport-Log DPP ${dppIdVonC}`);
-            dpp.transportLog.forEach((logEintrag, index) => {
-                console.log(`   ${index + 1}. Typ ${logEintrag.parametertyp}, Wert ${logEintrag.wert}, Status ${logEintrag.zustand}, System ${logEintrag.systemId || 'N/A'}, Ref ${logEintrag.offChainProtokoll || 'N/A'}`);
-                if (logEintrag.zustand && logEintrag.zustand.includes("ALARM")) {
-                    console.warn(`       WARNUNG Transport-Alarm im Logeintrag ${index + 1} (${logEintrag.zustand})`);
+        let transportProblemeFestgestellt = false;
+        if (dpp.verankerteTransportLogs && dpp.verankerteTransportLogs.length > 0) {
+            console.log(`\n---> D Empfangene Referenzen zu Transport-Log-Dateien DPP ${dppIdVonC}`);
+            dpp.verankerteTransportLogs.forEach((logRef, index) => {
+               console.log(`   ${index + 1}. Datei: ${logRef.dateiPfad}, Hash: ${logRef.dateiHash}, Alarm-Zusammenfassung: ${logRef.alarmZusammenfassung}, System: ${logRef.systemId || 'N/A'}`);
+                if (logRef.alarmZusammenfassung === "JA") {
+                console.warn(`       WARNUNG: Transport-Log-Datei ${index + 1} signalisiert einen Alarm! (${logRef.dateiPfad})`);
+                transportProblemeFestgestellt = true; 
                 }
             });
         } else {
-            console.log(`\n---> D Kein expliziter Transport-Log im DPP ${dppIdVonC}`);
+            console.log(`\n---> D Keine expliziten Referenzen zu Transport-Log-Dateien im DPP ${dppIdVonC}`);
         }
-        let transportProblemeFestgestellt = false;
-        if (dpp.transportLog && dpp.transportLog.some(tl => tl.zustand === "ALARM")) {
-             console.warn(`       WARNUNG DPP ${dppIdVonC} hat Transport-Alarm im Log!`);
-             transportProblemeFestgestellt = true;
+        if (transportProblemeFestgestellt) {
+            console.warn(`       WARNUNG: Mindestens eine Transport-Log-Datei für DPP ${dppIdVonC} signalisiert einen Alarm!`);
         }
+		
+		
+		
         console.log(`\n---> D Pruefung Qualitaetshistorie DPP ${dppIdVonC}`);
         if (dpp.quality && dpp.quality.length > 0) {
             dpp.quality.forEach((te, index) => {
