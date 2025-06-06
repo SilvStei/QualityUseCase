@@ -1,5 +1,6 @@
 'use strict';
 
+//notwendige Sachen festlegen
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
 const path = require('path');
@@ -7,177 +8,192 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const fabricUtils = require('./fabricUtils.js');
 
+
+//connection-Datei finden
 const ccpPfadOrg3 = path.resolve(
     __dirname, '..', '..', 'fabric-samples', 'test-network',
     'organizations', 'peerOrganizations', 'org3.example.com',
     'connection-org3.json'
 );
 const walletPfadOrgC = path.join(__dirname, 'walletC');
-const MSP_ID_ORG3 = 'Org3MSP';
-const CA_NAME_ORG3 = 'ca.org3.example.com';
-const ADMIN_ID_ORG3 = 'adminOrg3';
-const APP_USER_ID_ORG3 = 'appUserOrg3C';
+const mspIdOrg3 = 'Org3MSP';
+const caName3 = 'ca.org3.example.com';
+const adminIdOrg3 = 'adminOrg3';
+const appBenutzerIdOrg3 = 'appUserOrg3C';
 
-const PRODUKT_TYP_ID_C = 'PP_GF_COMPOUND_30';
-const GLN_ORG_C = '4077777000005';
-const CHARGE_C_PREFIX = 'CHARGE_C_COMPOUND_';
-const GS1_FIRMEN_PREFIX_C = '4077777';
-const GS1_ARTIKEL_REF_C = '056789';
+const produktTypIdC = 'Compound PP GF30';
+const glnOrgC = '4077777000005';
+const chargeCPrefix = 'CHARGE_C_COMPOUND_';
+const gs1FirmenPrefixC = '4077777';
+const gs1ArtikelRefC = '056789';
 
-const COMPOUND_DICHTE_TEST_NAME = "Compound Dichte";
-const COMPOUND_ZUGFESTIGKEIT_TEST_NAME = "Compound Zugfestigkeit";
-const COMPOUND_FARBE_TEST_NAME = "Compound Farbe";
+const compoundDichteTestName = "Compound Dichte";
+const compoundZugTestName = "Compound Zugfestigkeit";
+const compoundFarbeTestName = "Compound Farbe";
 
-const SPEZIFIKATIONEN_C = [
-    { name: COMPOUND_DICHTE_TEST_NAME, istNumerisch: true, grenzeNiedrig: 1.05, grenzeHoch: 1.15, einheit: "g/cm3", benoetigt: true },
-    { name: COMPOUND_ZUGFESTIGKEIT_TEST_NAME, istNumerisch: true, grenzeNiedrig: 50, grenzeHoch: 65, einheit: "MPa", benoetigt: true },
-    { name: COMPOUND_FARBE_TEST_NAME, istNumerisch: false, wertErwartet: "Grau-Schwarz", einheit: "", benoetigt: true }
+const spezifikationenC = [
+    { name: compoundDichteTestName, istNumerisch: true, grenzeNiedrig: 1.05, grenzeHoch: 1.15, einheit: "g/cm3", benoetigt: true },
+    { name: compoundZugTestName, istNumerisch: true, grenzeNiedrig: 50, grenzeHoch: 65, einheit: "MPa", benoetigt: true },
+    { name: compoundFarbeTestName, istNumerisch: false, wertErwartet: "Grau-Schwarz", einheit: "", benoetigt: true }
 ];
 
 async function main() {
     let gateway;
     try {
+
+        //Argumente des Aufrufs mitaufnehmen
         const dppIdVonA = process.argv[2];
         const dppIdVonB = process.argv[3];
         const transportProfilArg = process.argv[4] ? process.argv[4].toUpperCase() : "NORMAL";
         const valideTransportProfile = ["NORMAL", "TEMP_HOCH", "TEMP_NIEDRIG", "ERSCHUETTERUNG"];
 
-        if (!dppIdVonA || !dppIdVonB) {
-            console.error("FEHLER DPP IDs von A und B als Argumente angeben!");
-            console.error("Aufruf z.B. node unternehmenC_app.js <DPP_ID_A> <DPP_ID_B> [TRANSPORT_PROFIL]");
-            process.exit(1);
-        }
-        if (!valideTransportProfile.includes(transportProfilArg)) {
-            console.error(`FEHLER Ungueltiges Profil '${transportProfilArg}'. Waehle ${valideTransportProfile.join('|')}`);
-            process.exit(1);
-        }
-        console.log(`Transportprofil C -> D ${transportProfilArg}`);
-        console.log(`Input DPP von A ${dppIdVonA}`);
-        console.log(`Input DPP von B ${dppIdVonB}`);
 
+        //Fehler falls falsch aufgerufen
+        if (!dppIdVonA || !dppIdVonB || !valideTransportProfile.includes(transportProfilArg)) {
+            console.error("Falscher Aufruf");
+            console.error("node unternehmenC_app.js <DPP_ID_A> <DPP_ID_B> [TRANSPORT_PROFIL]");
+            console.error(`Profile ${valideTransportProfile.join('|')}`);
+            process.exit(1);
+            }
+
+         //Lesen Connection Profil und umwandeln
         const ccp = JSON.parse(fs.readFileSync(ccpPfadOrg3, 'utf8'));
-        const caInfo = ccp.certificateAuthorities[CA_NAME_ORG3];
+        const caInfo = ccp.certificateAuthorities[caName3];
         if (!caInfo || !caInfo.tlsCACerts || !caInfo.tlsCACerts.pem) {
-            throw new Error(`CA ${CA_NAME_ORG3} oder Zertifikate nicht in Verbindungsprofil gefunden`);
+            throw new Error(`CA ${caName3} oder Zertifikate nicht in Verbindungsprofil gefunden`);
         }
+
+
         const caTLSCACerts = caInfo.tlsCACerts.pem;
+
+        //Aufruf um CA zu erstellen
         const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
 
         const wallet = await Wallets.newFileSystemWallet(walletPfadOrgC);
-        console.log(`Wallet Pfad C ${walletPfadOrgC}`);
-        await fabricUtils.erstelleAdmin(wallet, ca, MSP_ID_ORG3, ADMIN_ID_ORG3, 'C');
-        await fabricUtils.erstelleBenutzer(wallet, ca, MSP_ID_ORG3, APP_USER_ID_ORG3, ADMIN_ID_ORG3, 'org3.department1', 'C');
 
+
+        //Erstellen von Admin und Benutzer
+        await fabricUtils.erstelleAdmin(wallet, ca, mspIdOrg3, adminIdOrg3, 'C');
+        await fabricUtils.erstelleBenutzer(wallet, ca, mspIdOrg3, appBenutzerIdOrg3, adminIdOrg3, 'org3.department1', 'C');
+
+
+        //Verbindung zum eigentlichen Netzwerk herstellen
         gateway = new Gateway();
         await gateway.connect(ccp, {
             wallet,
-            identity: APP_USER_ID_ORG3,
+            identity: appBenutzerIdOrg3,
             discovery: { enabled: true, asLocalhost: true }
         });
+
+
+        //Kanal und Chaincode zugreifen
         const network = await gateway.getNetwork('mychannel');
         const contract = network.getContract('dpp_quality');
 
-        console.log(`\n--> C Empfange DPPs von A und B`);
+
+
+        console.log(`Empfange DPPs von A und B`);
         const inputDPPIDs = [dppIdVonA, dppIdVonB];
+
+
+        //Empfangene Dpp überprüfen
         for (const inputDppId of inputDPPIDs) {
-            console.log(`\n---> C Bearbeite eingehenden DPP ${inputDppId}`);
-            await fabricUtils.abfrageUndLogDPP(contract, inputDppId, `Status ${inputDppId} (vor Empfang C)`, true);
-            
+            console.log(`Bearbeite eingehenden DPP ${inputDppId}`);
+
+            await fabricUtils.abfrageUndLogDPP(contract, inputDppId, `Status ${inputDppId} vor Empfang C`, true);
             const eingangspruefungErgebnis = "OK"; 
-            console.log(`---> C EmpfangBestaetigenUndPruefungAufzeichnen fuer ${inputDppId} Ergebnis ${eingangspruefungErgebnis}`);
-            await contract.submitTransaction('EmpfangBestaetigenUndPruefungAufzeichnen', inputDppId, GLN_ORG_C, eingangspruefungErgebnis);
-            console.log(`Empfang DPP ${inputDppId} durch C bestaetigt`);
-            await fabricUtils.abfrageUndLogDPP(contract, inputDppId, `Status ${inputDppId} (nach Empfang C)`, true);
+
+            console.log(`${inputDppId} hat Ergebnis ${eingangspruefungErgebnis}`);
+            await contract.submitTransaction('empfangBestaetigen', inputDppId, glnOrgC, eingangspruefungErgebnis);
+            console.log(`Empfang des DPP ${inputDppId} durch C bestätigt`);
+            await fabricUtils.abfrageUndLogDPP(contract, inputDppId, `Status ${inputDppId} nach Empfang C`, true);
         }
 
-        const uniqueIdPartC = Date.now();
-        const dppIdC = `DPP_C_${uniqueIdPartC}`;
-        const chargeC = `${CHARGE_C_PREFIX}${new Date().toISOString().slice(5, 10).replace('-', '')}`;
-        const gs1KeyC = `urn:epc:id:sgtin:${GS1_FIRMEN_PREFIX_C}.${GS1_ARTIKEL_REF_C}.${uniqueIdPartC % 100000}`;
+        const dppIdC = `DPP_C_001`;
+        const chargeC = `Charge_C_001`;
+        const gs1IdC = `urn:epc:id:sgtin:0000003.000003.000003`;
         
         const initialesCompoundTestergebnis = {
-            standardName: COMPOUND_DICHTE_TEST_NAME, 
+            standardName: compoundDichteTestName, 
             ergebnis: "1.09", 
             einheit: "g/cm3",
-            systemId: "INITIAL_COMPOUND_QA", 
+            systemId: "Compound Test C1", 
             zustaendiger: "PrüferC",
 			offChainProtokoll: "", 
 			dateiHash: "",      
         };
-        console.log(`\n--> C TransformationAufzeichnen Erzeuge DPP ${dppIdC}`);
+
+
+        console.log(`Erzeuge neuen DPP ${dppIdC} durch Transformation`);
+
+        //Dpps Transformieren um neuen Dpp zu erschaffen
         await contract.submitTransaction(
-            'TransformationAufzeichnen', 
+            'dppTransformieren', 
             dppIdC, 
-            gs1KeyC, 
-            PRODUKT_TYP_ID_C, 
-            GLN_ORG_C, 
+            gs1IdC, 
+            produktTypIdC, 
+            glnOrgC, 
             chargeC, 
             new Date().toISOString().split('T')[0], 
             JSON.stringify(inputDPPIDs),
-            JSON.stringify(SPEZIFIKATIONEN_C), 
+            JSON.stringify(spezifikationenC), 
             JSON.stringify(initialesCompoundTestergebnis)
         );
-        console.log(`Compound-DPP ${dppIdC} (GS1 ${gs1KeyC}) erstellt`);
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Initial Status Compound DPP ${dppIdC}`, true);
 
-        console.log(`\n--> C AufzeichnenTestergebnisse (${COMPOUND_ZUGFESTIGKEIT_TEST_NAME}) DPP ${dppIdC}`);
+
+        console.log(`Compound-DPP ${dppIdC} erstellt`);
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status des Compound DPP ${dppIdC}`, true);
+
+
+
+        console.log(`Test (${compoundZugTestName}) für DPP ${dppIdC}`);
         const zugfestigkeitTestDatenC = { 
-            standardName: COMPOUND_ZUGFESTIGKEIT_TEST_NAME, 
+            standardName: compoundZugTestName, 
             ergebnis: "58", 
             einheit: "MPa", 
-            systemId: "Mechanik-System",
+            systemId: "Mechanik System C1",
             zustaendiger: "PrüferC",
 			offChainProtokoll: "", 
 			dateiHash: "",        
         };
-        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(zugfestigkeitTestDatenC), GLN_ORG_C);
-        console.log(`Zugfestigkeits-Daten gespeichert`);
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Zugfestigkeit`, true);
+        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(zugfestigkeitTestDatenC), glnOrgC);
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status des Compound DPP ${dppIdC} nach Zugfestigkeit`, true);
 
-        console.log(`\n--> C AufzeichnenTestergebnisse (${COMPOUND_FARBE_TEST_NAME}) DPP ${dppIdC}`);
+        console.log(`Test (${compoundFarbeTestName}) für DPP ${dppIdC}`);
         const farbTestDatenC = { 
-            standardName: COMPOUND_FARBE_TEST_NAME, 
+            standardName: compoundFarbeTestName, 
             ergebnis: "Grau-Schwarz", 
             einheit: "", 
-            systemId: "QMS_Visuell",
+            systemId: "QMS C1",
             zustaendiger: "PrüferC",
 			offChainProtokoll: "", 
 			dateiHash: "",     
         };
-        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(farbTestDatenC), GLN_ORG_C);
-        console.log(`Farb-Daten gespeichert`);
-		console.log(`\n--> C AufzeichnenTestergebnisse (${COMPOUND_DICHTE_TEST_NAME}) DPP ${dppIdC}`);
+        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(farbTestDatenC), glnOrgC);
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status des Compound DPP ${dppIdC} nach Farbtest`, true);
+
+
+		console.log(`Test (${compoundDichteTestName}) für DPP ${dppIdC}`);
 		const dichteTestDatenC = {
-		standardName: COMPOUND_DICHTE_TEST_NAME,
-		ergebnis: "1.09",          // aktueller Messwert eintragen
+		standardName: compoundDichteTestName,
+		ergebnis: "1.09",         
 		einheit: "g/cm3",
-		systemId: "FINAL_COMPOUND_QA",
+		systemId: "Dichtessystem C1",
 		zustaendiger: "PrüferC",
 		offChainProtokoll: "",
 		dateiHash: ""
 		};
-		await contract.submitTransaction(
-		'AufzeichnenTestergebnisse',
-		dppIdC,
-		JSON.stringify(dichteTestDatenC),
-		GLN_ORG_C
-		);
-		console.log("Dichte-Daten gespeichert");
+        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(dichteTestDatenC), glnOrgC);
+        let dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Dichteprüfung`, true);
 
-		let dppCObj = await fabricUtils.abfrageUndLogDPP(
-		contract,
-		dppIdC,
-		`Status Compound DPP ${dppIdC} nach Dichte-Prüfung`,
-		true
-		);
-        let dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Farbpruefung`, true);
+        
         console.log(`\nCompound-DPP C ${dppIdC} vor Transport-Log\n`, JSON.stringify(dppCObj, null, 2));
 
         if (dppCObj.status === "Freigegeben" || dppCObj.status === "FreigegebenMitFehler") {
             const zielOrgD_MSP = 'Org4MSP';
 
             console.log(`\n--> C DPPUebertragen (Initial) ${dppIdC} an ${zielOrgD_MSP}`);
-            await contract.submitTransaction('DPPUebertragen', dppIdC, zielOrgD_MSP, GLN_ORG_C);
+            await contract.submitTransaction('DPPUebertragen', dppIdC, zielOrgD_MSP, glnOrgC);
             console.log(`Initialer Transfer ${dppIdC} an ${zielOrgD_MSP} initiiert`);
             dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, "Nach initialem Transfer an D", true);
 
@@ -206,8 +222,8 @@ async function main() {
                 const submitTransportCmd = `node Oracle_Transport.js \
                     --dpp ${dppIdC} \
                     --datei "${transportRohdatenPfad}" \
-                    --org ${MSP_ID_ORG3} \
-                    --gln ${GLN_ORG_C} \
+                    --org ${mspIdOrg3} \
+                    --gln ${glnOrgC} \
                     --system "LOGISTIK_C_TELEMATIK" \
                     --zustaendig "Logistik C-D"`;
                 console.log("       Befehl", submitTransportCmd.replace(/\s+/g, ' '));
@@ -225,7 +241,7 @@ async function main() {
             console.error(`ACHTUNG Compound DPP ${dppIdC} Status ${dppCObj.status} NICHT transferierbar`);
         }
 
-        console.log(`\nWICHTIG DPP ID ${dppIdC} (GS1 ${gs1KeyC}) für Unternehmen D notieren`);
+        console.log(`DPP-ID für A: ${dppIdC}`);
 
     } catch (error) {
         console.error(`C FEHLER Hauptablauf ${error.stack ? error.stack : error}`);

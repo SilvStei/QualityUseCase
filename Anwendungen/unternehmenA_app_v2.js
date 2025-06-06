@@ -1,184 +1,222 @@
-// unternehmenA_app_v2.js
 'use strict';
 
-const { Gateway, Wallets } = require('fabric-network');
+//notwendige Sachen festlegen
+const {Gateway, Wallets} = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
 const path = require('path');
 const fs = require('fs');
-const { execSync } = require('child_process');
-const fabricUtils = require('./fabricUtils.js'); // Import der Utility-Funktionen
+const {execSync} = require('child_process');
+const fabricUtils = require('./fabricUtils.js');
 
+
+//connection-org1 Datei finden
 const ccpPathOrg1 = path.resolve(
     __dirname, '..', '..', 'fabric-samples', 'test-network',
     'organizations', 'peerOrganizations', 'org1.example.com',
     'connection-org1.json'
 );
+
+
 const walletPathOrgA = path.join(__dirname, 'walletA');
-const MSP_ID_ORG1 = 'Org1MSP';
-const CA_NAME_ORG1 = 'ca.org1.example.com';
-const ADMIN_ID_ORG1 = 'adminOrg1';
-const APP_USER_ID_ORG1 = 'appUserOrg1A';
+const mspIdOrg1 = 'Org1MSP';
+const caName1 = 'ca.org1.example.com';
+const adminIdOrg1 = 'adminOrg1';
+const appBenutzerIdOrg1 = 'appUserOrg1A';
 
-const PRODUKT_TYP_ID_A = 'POLYPROPYLEN_X1';
-const GLN_ORG_A = '4012345000002';
-const CHARGE_A_PREFIX = 'CHARGE_A_';
-const GS1_FIRMEN_PREFIX_A = '4012345';
-const GS1_ARTIKEL_REF_A = '076543';
+const produktTypIdA = 'POLYPROPYLEN_A1';
+const glnOrgA = '4012345000002';
+const chargeAPrefix = 'CHARGE_A_';
+const gs1FirmenPrefixA = '4012345';
+const gs1ArtikelRefA = '076543';
 
-const MFI_TEST_NAME_KONST = "Melt Flow Index (230 GradC / 2,16 kg)";
-const VISUELL_TEST_NAME_KONST = "Visuelle Prüfung der Granulatfarbe";
-const DICHTE_TEST_NAME_KONST = "Dichte";
+const mfiTestNameKonst = "Schmelzflussindex";
+const visTestNameKonst = "Visuelle Prüfung der Granulatfarbe";
+const dichteTestNameKonst = "Dichte";
 
-const SPEZIFIKATIONEN_A = [
-    { name: MFI_TEST_NAME_KONST, istNumerisch: true, grenzeNiedrig: 10.0, grenzeHoch: 15.0, einheit: "g/10 min", benoetigt: true },
-    { name: VISUELL_TEST_NAME_KONST, istNumerisch: false, wertErwartet: "OK", einheit: "", benoetigt: true },
-    { name: DICHTE_TEST_NAME_KONST, istNumerisch: true, grenzeNiedrig: 0.89, grenzeHoch: 0.92, einheit: "g/cm3", benoetigt: false }
+
+//Array um Qualitätsgrenzen festzulegen
+const spezifikationenA = [
+    { name: mfiTestNameKonst, istNumerisch: true, grenzeNiedrig: 10.0, grenzeHoch: 15.0, einheit: "g/10 min", benoetigt: true },
+    { name: visTestNameKonst, istNumerisch: false, wertErwartet: "OK", einheit: "", benoetigt: true },
+    { name: dichteTestNameKonst, istNumerisch: true, grenzeNiedrig: 0.89, grenzeHoch: 0.92, einheit: "g/cm3", benoetigt: false }
 ];
-const MFI_SPEZIFIKATIONEN_A = SPEZIFIKATIONEN_A.find(s => s.name === MFI_TEST_NAME_KONST);
+
+//Mfi Test aus Array suchen
+const mfiSpezifikationenA = spezifikationenA.find(s => s.name === mfiTestNameKonst);
 
 async function main() {
     let gateway;
     try {
+
+        //Lesen Connection Profil und umwandeln
         const ccp = JSON.parse(fs.readFileSync(ccpPathOrg1, 'utf8'));
-        const caInfo = ccp.certificateAuthorities[CA_NAME_ORG1];
+        //CA auslesen
+        const caInfo = ccp.certificateAuthorities[caName1];
         if (!caInfo || !caInfo.tlsCACerts || !caInfo.tlsCACerts.pem) {
-            throw new Error(`CA ${CA_NAME_ORG1} oder Zertifikate nicht in Verbindungsprofil gefunden`);
+            throw new Error(`CA ${caName1} oder TLS Zertifikate nicht im Verbindungsprofil gefunden`);
         }
+
         const caTLSCACerts = caInfo.tlsCACerts.pem;
+
+        //Aufruf um CA zu erstellen 
         const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
 
+        //Wallet erzeugen
         const wallet = await Wallets.newFileSystemWallet(walletPathOrgA);
-        console.log(`Wallet Pfad A ${walletPathOrgA}`);
-        await fabricUtils.erstelleAdmin(wallet, ca, MSP_ID_ORG1, ADMIN_ID_ORG1, 'A');
-        await fabricUtils.erstelleBenutzer(wallet, ca, MSP_ID_ORG1, APP_USER_ID_ORG1, ADMIN_ID_ORG1, 'org1.department1', 'A');
+        // Admin anlegen
+        await fabricUtils.erstelleAdmin(wallet, ca, mspIdOrg1, adminIdOrg1, 'A');
+        //Benutzer anlegen
+        await fabricUtils.erstelleBenutzer(wallet, ca, mspIdOrg1, appBenutzerIdOrg1, adminIdOrg1, 'org1.department1', 'A');
+        
 
+        //Verbindung zum eigentlichen Netzwerk herstellen
         gateway = new Gateway();
         await gateway.connect(ccp, {
             wallet,
-            identity: APP_USER_ID_ORG1,
+            identity: appBenutzerIdOrg1,
             discovery: { enabled: true, asLocalhost: true }
         });
+
+        //auf Kanel im Netzwerk zugreifen
         const network = await gateway.getNetwork('mychannel');
+        //auf chaincode im Kanal zugreifen
         const contract = network.getContract('dpp_quality');
 
-        const uniqueIdPartA = Date.now();
-        const dppIdA = `DPP_A_${uniqueIdPartA}`;
-        const chargeA = `${CHARGE_A_PREFIX}${new Date().toISOString().slice(5, 10).replace('-', '')}`;
-        const gs1KeyA = `urn:epc:id:sgtin:${GS1_FIRMEN_PREFIX_A}.${GS1_ARTIKEL_REF_A}.${uniqueIdPartA % 100000}`;
+        //eindeutige Kennzeichnugen festlegen
+        const dppIdA = `DPP_A_001`;
+        const chargeA = `Charge_A_001`;
+        const gs1IdA = `urn:epc:id:sgtin:0000001.000001.000001`;
 
-        console.log(`\n--> A ErstelleDPP ${dppIdA} Produkt ${PRODUKT_TYP_ID_A}`);
+        console.log(`DPP ${dppIdA} erstellen für Produkt ${produktTypIdA}`);
+
+        //Dpp auf der Blockchain erstellen
         await contract.submitTransaction(
             'ErstellenDPP',
             dppIdA,
-            gs1KeyA,
-            PRODUKT_TYP_ID_A,
-            GLN_ORG_A,
+            gs1IdA,
+            produktTypIdA,
+            glnOrgA,
             chargeA,
             new Date().toISOString().split('T')[0],
-            JSON.stringify(SPEZIFIKATIONEN_A)
+            JSON.stringify(spezifikationenA)
         );
-        console.log(`DPP ${dppIdA} angelegt (GS1 ${gs1KeyA})`);
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach ErstellenDPP");
 
+
+        console.log(`DPP ${dppIdA} ist angelegt mit GS1 ${gs1IdA}`);
+
+        //Informationen zu DPP anzeigen
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach dem Erstellen: ");
+
+        //Sensordaten simulieren
         const sensorQualitaetProfil = "GUT";
-        console.log(`\n--> A Starte Simulation Inline-MFI-Sensor (Profil ${sensorQualitaetProfil}) DPP ${dppIdA}`);
+        console.log(`Starten des simulierten Inline-MFI-Sensors mit Profil ${sensorQualitaetProfil}) für DPP ${dppIdA}`);
 
-        console.log(`   1. Rufe generate_mfi_raw.js auf`);
-        let rawFilePath;
+        let pfadRohdaten;
         try {
             const generateCmd = `node MFI_Generierung.js ${dppIdA} ${sensorQualitaetProfil}`;
-            console.log(`       Befehl ${generateCmd}`);
+
+            //Skript aufrufen und in Var umleiten
             const generateOutput = execSync(generateCmd, { encoding: 'utf8', stdio: 'pipe' });
             console.log(generateOutput);
-            const match = generateOutput.match(/RAW_FILE_PATH=(.*)/);
-            if (match && match[1]) {
-                rawFilePath = match[1].trim();
-                console.log(`   Rohdaten-Datei ${rawFilePath}`);
+
+            //Suchen nach dem Pfad der Sensordatei in Var
+            const ergebnisSuche = generateOutput.match(/RAW_FILE_PATH=(.*)/);
+            if (ergebnisSuche && ergebnisSuche[1]) {
+                //Leerzeichen entfernen sonst gabs warum auch immer Fehler
+                pfadRohdaten = ergebnisSuche[1].trim();
             } else {
-                throw new Error("Konnte RAW_FILE_PATH nicht extrahieren");
+                throw new Error("Konnte Sensordatei nicht extrahieren");
             }
         } catch (e) {
-            console.error("Fehler generate_mfi_raw.js", e.message);
+            console.error("Fehler bei MFI_Generierung.js", e.message);
             throw e;
         }
 
-        console.log(`${rawFilePath} aufrufen und bearbeiten`);
         try {
-            if (!MFI_SPEZIFIKATIONEN_A) {
-                throw new Error(`MFI Spezifikationen für Test '${MFI_TEST_NAME_KONST}' nicht gefunden.`);
+            if (!mfiSpezifikationenA) {
+                throw new Error(`MFI Spezifikationen für Test '${mfiTestNameKonst}' nicht gefunden.`);
             }
+
+            //Oracle aufrufen und Informationen übergeben
             const aufrufOracleSkript = `node Oracle_MFI.js \
                 --dpp ${dppIdA} \
-                --datei "${rawFilePath}" \
-                --test "${MFI_TEST_NAME_KONST}" \
-                --org ${MSP_ID_ORG1} \
-                --gln ${GLN_ORG_A} \
-                --system "SENSOR_MFI_INLINE_A001" \
-                --zustaendig "Autom. Prozessueberwachung A" \
-                --grenze_niedrig ${MFI_SPEZIFIKATIONEN_A.grenzeNiedrig} \
-                --grenze_hoch ${MFI_SPEZIFIKATIONEN_A.grenzeHoch} \
-                --einheit "${MFI_SPEZIFIKATIONEN_A.einheit}"`;
+                --datei "${pfadRohdaten}" \
+                --test "${mfiTestNameKonst}" \
+                --org ${mspIdOrg1} \
+                --gln ${glnOrgA} \
+                --system "Sensor MFI A1" \
+                --zustaendig "Prozessüberwachung A1" \
+                --grenze_niedrig ${mfiSpezifikationenA.grenzeNiedrig} \
+                --grenze_hoch ${mfiSpezifikationenA.grenzeHoch} \
+                --einheit "${mfiSpezifikationenA.einheit}"`;
 
-            console.log("       Befehl", aufrufOracleSkript.replace(/\s+/g, ' '));
             const submitOutput = execSync(aufrufOracleSkript, { encoding: 'utf8', stdio: 'pipe' });
-            console.log("       Ausgabe Oracle_MFI.js");
+            console.log("Ausgabe des Oracles");
             console.log(submitOutput);
         } catch (e) {
-            console.error("Fehler Oracle_MFI.js", e.message);
+            console.error("Fehler beim Oracle", e.message);
             throw e;
         }
+
+        //Nochmal Aufrufen
         await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach Inline-MFI Integration");
 
-        console.log(`\n--> A AufzeichnenTestergebnisse (QMS ${VISUELL_TEST_NAME_KONST}) DPP ${dppIdA}`);
+        //Konstante für vis Test anlegen
+        console.log(`Testergebnisse der QMS ${visTestNameKonst}) für DPP ${dppIdA}`);
         const visuellTestDatenA = {
-        standardName: VISUELL_TEST_NAME_KONST,
+        standardName: visTestNameKonst,
 		ergebnis: "OK",
-		einheit: "", // Ist bereits vorhanden
+		einheit: "",
 		systemId: "QMS-A",
 		zustaendiger: "PrüferA",
-		offChainProtokoll: "ipfs://QmSimulatedVisualInspectionRecord123", // Feldname von 'offChain' geändert
-		dateiHash: "", // Hinzugefügt, kann leer sein, wenn nicht anwendbar
-    // bewertungsergebnis und kommentarBewertung werden i.d.R. vom Chaincode gesetzt
+		offChainProtokoll: "ipfs://QmSimuliert1",
+		dateiHash: "", 
 		};
-        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(visuellTestDatenA), GLN_ORG_A);
-        console.log(`QMS-Datensatz (Visuell) gespeichert`);
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, `Nach QMS (${VISUELL_TEST_NAME_KONST})`);
 
-        console.log(`\n--> A AufzeichnenTestergebnisse (${DICHTE_TEST_NAME_KONST}) DPP ${dppIdA}`);
+        //Daten auf Blockchain schreiben
+        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(visuellTestDatenA), glnOrgA);
+        console.log(`Daten der visuellen Prüfung gespeichert`);
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, `Nach dem QMS: (${visTestNameKonst})`);
+
+        console.log(`(${dichteTestNameKonst}) für DPP ${dppIdA}`);
+
+        //Konstante für Dichteergebnisse
         const dichteTestDatenA = {
-		standardName: DICHTE_TEST_NAME_KONST,
+		standardName: dichteTestNameKonst,
 		ergebnis: "0.91",
-		einheit: "g/cm3", // Ist bereits vorhanden
-		systemId: "SENSOR-A-DENS01",
+		einheit: "g/cm3",
+		systemId: "Dichte Sensor 1",
 		zustaendiger: "Anlage 1",
-		offChainProtokoll: "", // Hinzugefügt, kann leer sein
-		dateiHash: "",         // Hinzugefügt, kann leer sein
+		offChainProtokoll: "", 
+		dateiHash: "",       
 		};
-        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(dichteTestDatenA), GLN_ORG_A);
-        console.log(`Dichte-Sensor-Datensatz gespeichert`);
-        const dppFinal = await fabricUtils.abfrageUndLogDPP(contract, dppIdA, `Nach ${DICHTE_TEST_NAME_KONST}`);
 
-        console.log(`\nDPP-Inhalt A ${dppIdA} vor Transfer\n`, JSON.stringify(dppFinal, null, 2));
+        //Testergebnisse schreiben
+        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(dichteTestDatenA), glnOrgA);
+        console.log(`Dichte Daten gespeichert`);
+        const dppFinal = await fabricUtils.abfrageUndLogDPP(contract, dppIdA, `Nach ${dichteTestNameKonst}`);
+
+
+        //Ausgabe aller Ergebnisse, mit 2 sonst nicht gut lesbar
+        console.log(`Inhalt von ${dppIdA} vor Transfer`, JSON.stringify(dppFinal, null, 2));
 
         if (dppFinal.status === "Freigegeben" || dppFinal.status === "FreigegebenMitFehler") {
             const zielOrgC_MSP = 'Org3MSP';
-            console.log(`\n--> A DPPUebertragen ${dppIdA} von ${MSP_ID_ORG1} (GLN ${GLN_ORG_A}) an ${zielOrgC_MSP}`);
-            await contract.submitTransaction('DPPUebertragen', dppIdA, zielOrgC_MSP, GLN_ORG_A);
-            console.log(`Transfer ${dppIdA} an ${zielOrgC_MSP} initiiert`);
-            await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach TransferInitiative an C");
+            console.log(`Senden des DPP ${dppIdA} von ${mspIdOrg1} an ${zielOrgC_MSP}`);
+            await contract.submitTransaction('DPPUebertragen', dppIdA, zielOrgC_MSP, glnOrgA);
+            await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach Transfer an C");
         } else {
-            console.error(`ACHTUNG DPP ${dppIdA} Status ${dppFinal.status} und kann NICHT transferiert werden! Demo hier beendet`);
+            console.error(`DPP ${dppIdA} hat Status ${dppFinal.status} und kann nicht transferiert werden`);
         }
 
-        console.log(`\nWICHTIG DPP ID ${dppIdA} (GS1 ${gs1KeyA}) für nächste Schritte notieren!`);
+        console.log(`DPP-ID für A: ${dppIdA}`);
 
     } catch (error) {
-        console.error(`A FEHLER Hauptablauf unternehmenA_app_v2.js ${error.stack ? error.stack : error}`);
+        console.error(`Fehler in unternehmenA_app_v2.js: ${error.message || error}`);
         process.exit(1);
     } finally {
         if (gateway) {
             await fabricUtils.trenneGateway(gateway);
-            console.log('\nA Gateway getrennt – Unternehmen A Demo beendet');
         }
     }
 }

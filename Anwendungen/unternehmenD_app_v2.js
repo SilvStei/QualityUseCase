@@ -12,11 +12,11 @@ const ccpPfadOrg4 = path.resolve(
     'connection-org4.json'
 );
 const walletPfadOrgD = path.join(__dirname, 'walletD');
-const MSP_ID_ORG4 = 'Org4MSP';
-const CA_NAME_ORG4 = 'ca.org4.example.com';
-const ADMIN_ID_ORG4 = 'adminOrg4';
-const APP_USER_ID_ORG4 = 'appUserOrg4D';
-const GLN_ORG_D = '4011111000009';
+const mspIdOrg4 = 'Org4MSP';
+const caName4 = 'ca.org4.example.com';
+const adminIdOrg4 = 'adminOrg4';
+const appBenutzerIdOrg4 = 'appUserOrg4D';
+const glnOrgD = '4011111000009';
 
 async function main() {
     let gateway;
@@ -30,21 +30,21 @@ async function main() {
         console.log(`Unternehmen D verarbeitet DPP ${dppIdVonC}`);
 
         const ccp = JSON.parse(fs.readFileSync(ccpPfadOrg4, 'utf8'));
-        const caInfo = ccp.certificateAuthorities[CA_NAME_ORG4];
+        const caInfo = ccp.certificateAuthorities[caName4];
         if (!caInfo || !caInfo.tlsCACerts || !caInfo.tlsCACerts.pem) {
-            throw new Error(`CA ${CA_NAME_ORG4} oder Zertifikate nicht in Verbindungsprofil gefunden`);
+            throw new Error(`CA ${caName4} oder Zertifikate nicht in Verbindungsprofil gefunden`);
         }
         const caTLSCACerts = caInfo.tlsCACerts.pem;
         const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
 
         const wallet = await Wallets.newFileSystemWallet(walletPfadOrgD);
         console.log(`Wallet Pfad D ${walletPfadOrgD}`);
-        await fabricUtils.erstelleAdmin(wallet, ca, MSP_ID_ORG4, ADMIN_ID_ORG4, 'D');
-        await fabricUtils.erstelleBenutzer(wallet, ca, MSP_ID_ORG4, APP_USER_ID_ORG4, ADMIN_ID_ORG4, 'org4.department1', 'D');
+        await fabricUtils.erstelleAdmin(wallet, ca, mspIdOrg4, adminIdOrg4, 'D');
+        await fabricUtils.erstelleBenutzer(wallet, ca, mspIdOrg4, appBenutzerIdOrg4, adminIdOrg4, 'org4.department1', 'D');
 
         gateway = new Gateway();
         await gateway.connect(ccp, {
-            wallet, identity: APP_USER_ID_ORG4, discovery: { enabled: true, asLocalhost: true }
+            wallet, identity: appBenutzerIdOrg4, discovery: { enabled: true, asLocalhost: true }
         });
         const network = await gateway.getNetwork('mychannel');
         const contract = network.getContract('dpp_quality');
@@ -52,11 +52,11 @@ async function main() {
         console.log(`\n--> D DPPAbfragen ${dppIdVonC} (empfangen von C)`);
         let dpp = await fabricUtils.abfrageUndLogDPP(contract, dppIdVonC, `Status ${dppIdVonC} bei Ankunft D`, true);
 
-        const erwarteterStatusPrefix = `TransportZu_${MSP_ID_ORG4}`;
-        if (dpp.ownerOrg !== MSP_ID_ORG4 || !dpp.status.startsWith(erwarteterStatusPrefix)) {
-            throw new Error(`DPP ${dppIdVonC} nicht korrekt an ${MSP_ID_ORG4} transferiert. Aktuell Owner ${dpp.ownerOrg}, Status ${dpp.status}`);
+        const erwarteterStatusPrefix = `TransportZu_${mspIdOrg4}`;
+        if (dpp.ownerOrg !== mspIdOrg4 || !dpp.status.startsWith(erwarteterStatusPrefix)) {
+            throw new Error(`DPP ${dppIdVonC} nicht korrekt an ${mspIdOrg4} transferiert. Aktuell Owner ${dpp.ownerOrg}, Status ${dpp.status}`);
         }
-        console.log(`DPP ${dppIdVonC} korrekt an ${MSP_ID_ORG4} unterwegs`);
+        console.log(`DPP ${dppIdVonC} korrekt an ${mspIdOrg4} unterwegs`);
 
         let transportProblemeFestgestellt = false;
         if (dpp.verankerteTransportLogs && dpp.verankerteTransportLogs.length > 0) {
@@ -97,11 +97,11 @@ async function main() {
              console.log(`   Ware wird abgelehnt ${grundAblehnung}`);
         }
 
-        console.log(`\n--> D EmpfangBestaetigenUndPruefungAufzeichnen DPP ${dppIdVonC}`);
+        console.log(`\n--> D empfangBestaetigen DPP ${dppIdVonC}`);
         await contract.submitTransaction(
-            'EmpfangBestaetigenUndPruefungAufzeichnen',
+            'empfangBestaetigen',
             dppIdVonC,
-            GLN_ORG_D,
+            glnOrgD,
             eingangspruefungErgebnisD 
         );
         console.log(`Empfang DPP ${dppIdVonC} durch D verarbeitet Ergebnis ${eingangspruefungErgebnisD}`);

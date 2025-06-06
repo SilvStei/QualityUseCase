@@ -60,19 +60,19 @@ async function trenneGateway(gateway) {
 }
 
 async function abfrageUndLogDPP(contract, dppId, kontextNachricht, includeOwner = false) {
-    console.log(`\n--- INFO ${kontextNachricht} - Status ${dppId} ---`);
+    console.log(`Info: ${kontextNachricht} Status: ${dppId}`);
     const dppBytes = await contract.evaluateTransaction('DPPAbfragen', dppId);
     const dpp = JSON.parse(dppBytes.toString());
-    let logMessage = `Status ${dpp.status}`;
+    let logMessage = `Status des DPP: ${dpp.status}`;
     if (includeOwner) {
-        logMessage += `, Owner ${dpp.ownerOrg}`;
+        logMessage += `, Besitzer: ${dpp.ownerOrg}`;
     }
     console.log(logMessage);
     if (dpp.offenePflichtpruefungen && dpp.offenePflichtpruefungen.length > 0) {
-        console.log(`Offene Pflichtpruefungen ${dpp.offenePflichtpruefungen.join(', ')}`);
+        console.log(`Noch offene Pflichtprüfungen ${dpp.offenePflichtpruefungen.join(', ')}`);
     }
     if (dpp.status === "Gesperrt") {
-        console.error(`ACHTUNG DPP ${dppId} ist gesperrt!`);
+        console.error(`DPP ${dppId} ist gesperrt!`);
     }
     return dpp;
 }
