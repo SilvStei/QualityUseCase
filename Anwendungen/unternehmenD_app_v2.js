@@ -86,65 +86,90 @@ async function main() {
         console.log(`${dppIdVonC} an ${mspIdOrg4} unterwegs`);
 
 
-        //Hier weitermachen
+        //Transportdaten überprüfen
         let transportProblemeFestgestellt = false;
+
+        //Schauen ob Transportdaten vorliegen
         if (dpp.verankerteTransportLogs && dpp.verankerteTransportLogs.length > 0) {
             console.log(`Transportdaten zu ${dppIdVonC} empfangen`);
-            dpp.verankerteTransportLogs.forEach((logRef, index) => {
-               console.log(`   ${index + 1}. Datei: ${logRef.dateiPfad}, Hash: ${logRef.dateiHash}, Alarm-Zusammenfassung: ${logRef.alarmZusammenfassung}, System: ${logRef.systemId || 'N/A'}`);
-                if (logRef.alarmZusammenfassung === "JA") {
-                console.warn(`       WARNUNG: Transport-Log-Datei ${index + 1} signalisiert einen Alarm! (${logRef.dateiPfad})`);
-                transportProblemeFestgestellt = true; 
+
+            //Log Einträge durchgehen
+            for (let i = 0; i < dpp.verankerteTransportLogs.length; i++) {
+            const logRef = dpp.verankerteTransportLogs[i]; 
+            const eintragNummer = i + 1; 
+            const logStatus = logRef.alarmZusammenfassung === "JA" ? "FEHLER" : "OK";
+
+            //Einträge ausgeben
+            console.log(`${eintragNummer}. Log von "${logRef.dateiPfad}": Status ist ${logStatus}`);
+            
+
+            if (logRef.alarmZusammenfassung === "JA") {
+            console.warn(`Transportdatei ${eintragNummer + 1} stellt Alarm fest: (${logRef.dateiPfad})`);
+            transportProblemeFestgestellt = true; 
                 }
-            });
+            }
         } else {
-            console.log(`\n---> D Keine expliziten Referenzen zu Transport-Log-Dateien im DPP ${dppIdVonC}`);
+            console.log(`Keine Informationen in den Transportdaten von ${dppIdVonC}`);
         }
+
+
         if (transportProblemeFestgestellt) {
-            console.warn(`       WARNUNG: Mindestens eine Transport-Log-Datei für DPP ${dppIdVonC} signalisiert einen Alarm!`);
+            console.warn(`Ein oder mehrere Alarme in ${dppIdVonC} festgestellt`);
         }
 		
 		
-		
-        console.log(`\n---> D Pruefung Qualitaetshistorie DPP ${dppIdVonC}`);
+		//Qualitätshistorie prüfen
+        console.log(`Prüfen der Qualitätshistorie von ${dppIdVonC}`);
+
         if (dpp.quality && dpp.quality.length > 0) {
-            dpp.quality.forEach((te, index) => {
-                console.log(`   ${index + 1}. Test ${te.standardName}, Ergebnis ${te.ergebnis} ${te.einheit || ''}, Bewertung ${te.bewertungsergebnis || 'N/A'}, Org ${te.durchfuehrendeOrg}`);
-            });
-        } else {
-            console.log("   Keine expliziten Qualitaetseintraege im DPP");
+        for (let i = 0; i < dpp.quality.length; i++) {
+        const testEintrag = dpp.quality[i];
+        const testNummer = i + 1;
+
+        console.log(`${testNummer}. Qualitätstest:`);
+        console.log(`   Name: ${testEintrag.standardName}`);
+        console.log(`   Ergebnis: ${testEintrag.ergebnis} ${testEintrag.einheit || ''}`); 
+        console.log(`   Bewertung: ${testEintrag.bewertungsergebnis || 'N/A'}`); 
+        console.log(`   Durchgeführt von Organisation: ${testEintrag.durchfuehrendeOrg}`);
+        console.log('\n');
+         } 
+        }
+        else {
+            console.log("Keine Qualitätseinträge im DPP");
         }
 
         let akzeptiereWare = true;
         let grundAblehnung = "";
 
         if (transportProblemeFestgestellt) {
-            console.log(`   ENTSCHEIDUNG Ware ${dppIdVonC} wegen Transport-Problemen genauer pruefen.`);
+            console.log(`Produkt ${dppIdVonC} wegen Problemen bei Transport genauer prüfen`);
         }
         const eingangspruefungErgebnisD = akzeptiereWare ? "OK" : "NICHT_OKAY";
         if (!akzeptiereWare) {
-             console.log(`   Ware wird abgelehnt ${grundAblehnung}`);
+             console.log(`   Produkt wird abgelehnt, weil ${grundAblehnung}`);
         }
 
-        console.log(`\n--> D empfangBestaetigen DPP ${dppIdVonC}`);
+        console.log(`Bestätige Empfang von ${dppIdVonC}`);
         await contract.submitTransaction(
             'empfangBestaetigen',
             dppIdVonC,
             glnOrgD,
             eingangspruefungErgebnisD 
         );
-        console.log(`Empfang DPP ${dppIdVonC} durch D verarbeitet Ergebnis ${eingangspruefungErgebnisD}`);
+        console.log(`Empfang des DPP ${dppIdVonC} durch D verarbeitet mit dem Ergebnis ${eingangspruefungErgebnisD}`);
         
-        const finalerDppBeiD = await fabricUtils.abfrageUndLogDPP(contract, dppIdVonC, `Finaler Zustand DPP ${dppIdVonC} bei D`, true);
-        console.log(`\nDPP-Inhalt D nach Annahme ${dppIdVonC}\n`, JSON.stringify(finalerDppBeiD, null, 2));
+        //Nochmal den finalen Status abfragen
+        const finalerDppBeiD = await fabricUtils.abfrageUndLogDPP(contract, dppIdVonC, `Finaler Zustand des DPP ${dppIdVonC} bei D`, true);
+        console.log(`Inhalt nach Annahme ${dppIdVonC}`, JSON.stringify(finalerDppBeiD, null, 2));
 
     } catch (error) {
-        console.error(`D FEHLER ${error.stack ? error.stack : error}`);
+        console.error(`Fehler in Skript: ${error.message || error}`);
         process.exit(1);
+
+
     } finally {
         if (gateway) {
             await fabricUtils.trenneGateway(gateway);
-            console.log('\nD Gateway getrennt – Unternehmen D Demo beendet');
         }
     }
 }

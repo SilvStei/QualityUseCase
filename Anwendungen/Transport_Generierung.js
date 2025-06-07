@@ -4,114 +4,128 @@ const fs = require('fs');
 const path = require('path');
 
 
-// Hier werden die Anzahl der simulierten Sesnordaten und die Grenzwerte für Temperatur und Erschütterungen festgelegt
+//Grenzwerte festlegen
 
-const ANZAHL_LOG_EINTRAGE = 5; 
-const TEMP_NORMAL_MIN = 5.0;
-const TEMP_NORMAL_MAX = 30.0;
-const TEMP_ALARM_HOCH = 35.1;  
-const TEMP_ALARM_NIEDRIG = -0.1; 
-const ERSCHUETTERUNG_NORMAL_MAX_G = 0.8;
-const ERSCHUETTERUNG_ALARM_G = 1.1; 
+const anzahlLogEintraege = 5; 
+const tempNormalMin = 5.0;
+const tempNormalMax= 30.0;
+const tempAlarmHoch = 35.1;  
+const tempAlarmNiedrig = -0.1; 
+const erschuettNormalMax= 0.8;
+const erschuettAlarm = 1.1; 
 
 
-// Hier wird das Verzeichnis für die CSV Datei festgelegt. Falls dieses nicht existiert, wird es erstellt.
-
+//Verzeichnis erstellen
 const offChainLogVerzeichnis = path.join(__dirname, 'offchain_transport_logs');
 if (!fs.existsSync(offChainLogVerzeichnis)) {
     fs.mkdirSync(offChainLogVerzeichnis, { recursive: true });
 }
 
 
-// In dieser Funktion wird der Transportsensor simuliert. 
-
+//Sensorwerte simulieren
 function generiereTransportLogs(dppId, transportProfil) {
     const logs = [];
     const startZeit = new Date();
 
-    for (let i = 0; i < ANZAHL_LOG_EINTRAGE; i++) {
-        const zeitpunkt = new Date(startZeit.getTime() + i * 2 * 3600000);
 
-        let tempWert = TEMP_NORMAL_MIN + Math.random() * (TEMP_NORMAL_MAX - TEMP_NORMAL_MIN);
+    for (let i = 0; i < anzahlLogEintraege; i++) {
+        //Messdaten jede Sekunde
+        const zeitpunkt = new Date(startZeit.getTime() + i * 1000);
+
+        //Normale Temperatur festlegen
+        let tempWert = tempNormalMin + Math.random() * (tempNormalMax - tempNormalMin);
         let tempZustand = 'OK';
 
+        //Feuchtigkeitsmessung
         logs.push({
-            zeitstempel: new Date(zeitpunkt.getTime() + 300000).toISOString(), 
-            parametertyp: 'FeuchtigkeitRelativ',
+            zeitstempel: new Date(zeitpunkt.getTime()).toISOString(), 
+            parametertyp: 'Relative Feuchtigkeit',
             wert: (40 + Math.random() * 15).toFixed(1),
             einheit: '%',
             zustand: 'OK',
         });
 
-        let erschuetterungWert = (Math.random() * ERSCHUETTERUNG_NORMAL_MAX_G).toFixed(2);
+        //Erschütterungswert festlegen
+        let erschuetterungWert = (Math.random() * erschuettNormalMax).toFixed(2);
         let erschuetterungZustand = 'OK';
 
-        if (i > 0 && i === Math.floor(ANZAHL_LOG_EINTRAGE / 2) + 1) { 
-            switch (transportProfil) {
-                case 'TEMP_HOCH':
-                    tempWert = TEMP_ALARM_HOCH + Math.random() * 2;
-                    tempZustand = 'ALARM';
-                    break;
-                case 'TEMP_NIEDRIG':
-                    tempWert = TEMP_ALARM_NIEDRIG - Math.random() * 2;
-                    tempZustand = 'ALARM';
-                    break;
-                case 'ERSCHUETTERUNG':
-                    erschuetterungWert = (ERSCHUETTERUNG_ALARM_G + Math.random() * 0.5).toFixed(2);
-                    erschuetterungZustand = 'ALARM';
-                    break;
-            }
+        //Fehler nur bei zweitem und drittem Alarm
+        if (i === 1 || i === 2) {
+        if (transportProfil === 'TEMP_HOCH') {
+        tempWert = tempAlarmHoch + Math.random() * 2;
+        tempZustand = 'ALARM';
+        } else if (transportProfil === 'TEMP_NIEDRIG') {
+        tempWert = tempAlarmNiedrig - Math.random() * 2;
+        tempZustand = 'ALARM';
+        } else if (transportProfil === 'ERSCHUETTERUNG') {
+        erschuetterungWert = (erschuettAlarm + Math.random() * 0.5).toFixed(2);
+        erschuetterungZustand = 'ALARM';
         }
+        }
+
+        //Temperatur Logs erstellen
         logs.push({
             zeitstempel: zeitpunkt.toISOString(),
             parametertyp: 'Temperatur',
             wert: tempWert.toFixed(1),
-            einheit: 'GradC',
+            einheit: '°C',
             zustand: tempZustand,
         });
+
+        //Erschütterung Logs erstellen
         logs.push({
             zeitstempel: new Date(zeitpunkt.getTime() + 600000).toISOString(),
-            parametertyp: 'Erschuetterung',
+            parametertyp: 'Erschütterung',
             wert: erschuetterungWert,
             einheit: 'g',
             zustand: erschuetterungZustand,
         });
     }
-    logs.sort((a, b) => new Date(a.zeitstempel) - new Date(b.zeitstempel));
-    return logs;
+
 }
 
+
+
 async function main() {
+    //Argumente überprüfen
     if (process.argv.length < 4) {
-        console.error("FEHLER DPP ID und Transportprofil angeben");
+        console.error("DPP ID und Transportprofil müssen angegeben werden");
         process.exit(1);
     }
+
+    //Dpp Id holen
     const dppId = process.argv[2];
+    //Transportprofil holen
     const transportProfil = process.argv[3].toUpperCase();
-    const valideProfile = ["NORMAL", "TEMP_HOCH", "TEMP_NIEDRIG", "ERSCHUETTERUNG"];
 
-    if (!valideProfile.includes(transportProfil)) {
-        console.error(`FEHLER Ungueltiges Profil '${transportProfil}'.`);
+    const profilChecken = ["NORMAL", "TEMP_HOCH", "TEMP_NIEDRIG", "ERSCHUETTERUNG"];
+
+    if (!profilChecken.includes(transportProfil)) {
+        console.error(`Ungültiges Profil '${transportProfil}'`);
         process.exit(1);
     }
 
-    console.log(`TRANSPORT-SIM Generiere Logs DPP ${dppId}, Profil ${transportProfil}`);
+    //Eigentliche Logs generieren
+    console.log(`Generiere Logs für DPP ${dppId}, Profil ${transportProfil}`);
     const transportLogs = generiereTransportLogs(dppId, transportProfil);
 
+    //Struktur für CSV festlegen
     let csvInhalt = "zeitstempel,parametertyp,wert,einheit,zustand\n";
     transportLogs.forEach(log => {
         csvInhalt += `${log.zeitstempel},${log.parametertyp},${log.wert},${log.einheit},${log.zustand}\n`;
     });
 
+    //Informationen für Datei erstellen
     const zeitstempelDateiTeil = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
     const ausgabeDateiname = `${dppId}_TRANSPORT_${transportProfil}_${zeitstempelDateiTeil}.csv`;
     const ausgabePfad = path.join(offChainLogVerzeichnis, ausgabeDateiname);
 
+    //Datei schreiben
     try {
         fs.writeFileSync(ausgabePfad, csvInhalt);
         console.log(`RAW_FILE_PATH=${ausgabePfad}`);
     } catch (err) {
-        console.error(`Fehler Schreiben Transport-Log Datei ${err}`);
+        console.error(`Fehler beim Schreiben der Datei ${err}`);
         process.exit(1);
     }
 }

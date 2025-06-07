@@ -1,6 +1,7 @@
-// Oracle_MFI.js
 'use strict';
 
+
+//Benötigt
 const { Gateway, Wallets } = require('fabric-network');
 const FabricCAServices = require('fabric-ca-client');
 const path = require('path');
@@ -9,108 +10,168 @@ const { ArgumentParser } = require('argparse');
 const fabricUtils = require('./fabricUtils.js');
 const crypto = require('crypto');
 
+
+//Konsolenargumente lesen und bearbeiten
 function parseArgumente() {
     const parser = new ArgumentParser({
-        description: 'Verarbeitet Sensor-Rohdaten und reicht sie bei der Blockchain ein.'
+        beschreibung: 'Sensordaten verarbeiten und hashen'
     });
-    parser.add_argument('--dpp', { help: 'DPP ID', required: true });
-    parser.add_argument('--datei', { help: 'Pfad zur CSV Rohdaten-Datei', required: true });
-    parser.add_argument('--test', { help: 'Name des Tests (StandardName im Chaincode)', required: true });
-    parser.add_argument('--org', { help: 'MSP ID der Organisation', required: true });
-    parser.add_argument('--gln', { help: 'GLN der aufzeichnenden Site', required: true });
-    parser.add_argument('--system', { help: 'ID des erfassenden Systems', required: true });
-    parser.add_argument('--zustaendig', { help: 'Zustaendige Person/Abteilung', default: 'Autom. Prozessueberwachung' });
-    parser.add_argument('--grenze_niedrig', { help: 'Untere Grenze (optional)', type: 'float', required: false });
-    parser.add_argument('--grenze_hoch', { help: 'Obere Grenze (optional)', type: 'float', required: false });
-    parser.add_argument('--wert_erwartet', { help: 'Erwarteter String-Wert (optional)', type: 'str', required: false });
-    parser.add_argument('--einheit', { help: 'Einheit des Ergebnisses', required: false, default: "" });
+    parser.add_argument('--dpp', { required: true });
+    parser.add_argument('--datei', { required: true });
+    parser.add_argument('--test', { required: true });
+    parser.add_argument('--org', { required: true });
+    parser.add_argument('--gln', { required: true });
+    parser.add_argument('--system', { required: true });
+    parser.add_argument('--zustaendig', { default: 'Autom Prozessüberwachung' });
+    parser.add_argument('--grenze_niedrig', { type: 'float', required: false });
+    parser.add_argument('--grenze_hoch', { type: 'float', required: false });
+    parser.add_argument('--wert_erwartet', { type: 'str', required: false });
+    parser.add_argument('--einheit', { required: false, default: "" });
     return parser.parse_args();
 }
 
+
+
 async function main() {
+
+
     const args = parseArgumente();
-    console.log(`\n--> INTEGRATION Verarbeite Daten aus ${args.datei}`);
-    console.log(`    DPP ${args.dpp}, Test "${args.test}", Org ${args.org}`);
+    console.log(`Verarbeite Daten aus ${args.datei}`);
+    console.log(`  DPP ${args.dpp}, Test "${args.test}", Org ${args.org}`);
 
     let gateway;
+
+
     try {
+
+        //Schauen ob Datei existiert
         if (!fs.existsSync(args.datei)) {
-            throw new Error(`Rohdaten-Datei nicht gefunden ${args.datei}`);
+            throw new Error(`Sensorlog nicht gefunden ${args.datei}`);
         }
+
         const dateiInhalt = fs.readFileSync(args.datei, 'utf8');
+
+        //Hash erzeugen um Unveränderlichkeit bezeugen zu können
 		const dateiHash = crypto.createHash('sha256').update(dateiInhalt).digest('hex');
-        console.log(`Datei-Hash (SHA256) ist ${dateiHash}`);
+        console.log(`  Hash ist ${dateiHash}`);
+
+        //Leerzeichen entfernen und zeilenweise Strings
         const zeilen = dateiInhalt.trim().split('\n');
+
         if (zeilen.length <= 1) {
             throw new Error(`Keine Daten in Datei ${args.datei}`);
         }
 
+        //Leerzeichen entfernen und zeilenweise Strings
         const kopfzeile = zeilen.shift().toLowerCase().split(',');
+        //nach mfi_wert schauen
         const wertIndex = kopfzeile.indexOf('mfi_wert');
+
+
         if (wertIndex === -1) {
-            throw new Error("Spalte 'mfi_wert' nicht in CSV gefunden");
+            throw new Error("mfi_wert nicht in gefunden");
         }
 
-        const messwerte = zeilen.map(zeile => parseFloat(zeile.split(',')[wertIndex])).filter(val => !isNaN(val));
+        //Mfi Werte aus den einzelnen Zeilen holen
+        const messwerte = [];
+        for (const zeile of zeilen) {
+            const spaltenInDieserZeile = zeile.split(',');
+            const textWert = spaltenInDieserZeile[wertIndex];
+            const numerischerWert = parseFloat(textWert);
+            if (!isNaN(numerischerWert)) {
+                messwerte.push(numerischerWert);
+            }
+        }
         if (messwerte.length === 0) {
-            throw new Error("Keine gueltigen numerischen Werte gefunden");
+            throw new Error("Keine numerischen Werte in Datei");
         }
 
-        const summe = messwerte.reduce((acc, val) => acc + val, 0);
-        const durchschnitt = parseFloat((summe / messwerte.length).toFixed(2));
+        //Messwerte addieren
+        let summe = 0;
+        for (const zahl of messwerte) {
+            summe += zahl;
+        }
+
+        //Zahlen runden und einheitlich auf zwei Nachkommastellen bringen
+        let ungerundDurchschnitt = summe / messwerte.length;
+        let gerundeterDurchschnitt = ungerundDurchschnitt.toFixed(2);
+        const durchschnitt = parseFloat(gerundeterDurchschnitt);
+
+
         let bewertungsergebnisClient = "";
-        let kommentarClient = `Durchschnitt von ${messwerte.length} Messungen: ${durchschnitt}`;
+        let kommentarClient = `Durchschnitt der ${messwerte.length} Messungen ist ${durchschnitt}`;
         const ergebnisFuerChaincode = String(durchschnitt);
         const einheitFuerChaincode = args.einheit || "";
 
+        //Schauen ob Grenzwerte zahlen sind
         if (typeof args.grenze_niedrig === 'number' && typeof args.grenze_hoch === 'number') {
+            //Schauen ob außerhalb Grenzwerte
             if (durchschnitt < args.grenze_niedrig || durchschnitt > args.grenze_hoch) {
-                console.log(`    CLIENT-INFO Durchschnitt ${durchschnitt} ausserhalb Spez (${args.grenze_niedrig}-${args.grenze_hoch})`);
+                console.log(`   Durchschnitt ${durchschnitt} ausserhalb Grenzen (${args.grenze_niedrig}-${args.grenze_hoch})`);
             } else {
-                console.log(`    CLIENT-INFO Durchschnitt ${durchschnitt} innerhalb Spez (${args.grenze_niedrig}-${args.grenze_hoch})`);
+                console.log(`   Durchschnitt ${durchschnitt} innerhalb Grenzen (${args.grenze_niedrig}-${args.grenze_hoch})`);
             }
+
+        //Schauen ob überhaupt Wert mitgeliefert
         } else if (args.wert_erwartet) {
             const einzelwert = String(messwerte[0]);
             if (einzelwert.toLowerCase() === args.wert_erwartet.toLowerCase()) {
-                console.log(`    CLIENT-INFO Wert "${einzelwert}" entspricht Erwartung.`);
+                console.log(`   Wert "${einzelwert}" entspricht der Erwartung`);
             } else {
-                console.log(`    CLIENT-INFO Wert "${einzelwert}" entspricht NICHT Erwartung "${args.wert_erwartet}".`);
+                console.log(`   Wert "${einzelwert}" entspricht nicht der Erwartung "${args.wert_erwartet}"`);
             }
         }
-        console.log(`--- INTEGRATION Aggregiertes Ergebnis ${durchschnitt}, Kommentar ${kommentarClient} ---`);
+
+        console.log(`Ergebnis ist ${durchschnitt}, Kommentar ${kommentarClient}`);
 
         const orgKurzName = args.org.replace('MSP', '');
-        const ccpPfad = fabricUtils.getCcpPath(args.org, __dirname);
+
+        //Connection Profil holen
+        const ccpPfad = fabricUtils.holeCcpPfad(args.org, __dirname);
         if (!fs.existsSync(ccpPfad)) throw new Error(`CCP ${ccpPfad} nicht gefunden`);
+        //Nutzbar machen
         const ccp = JSON.parse(fs.readFileSync(ccpPfad, 'utf8'));
 
+        //OrgX muss großgeschrieben sein, sonst Fehler - deshalb ersten Buchstaben groß
         const orgCcpName = orgKurzName.charAt(0).toUpperCase() + orgKurzName.slice(1);
+
+
         if (!ccp.organizations[orgCcpName] || !ccp.organizations[orgCcpName].certificateAuthorities || ccp.organizations[orgCcpName].certificateAuthorities.length === 0) {
-            throw new Error(`Keine CAs fuer ${orgCcpName} in ${ccpPfad}`);
+            throw new Error(`Keine CAs für ${orgCcpName} in ${ccpPfad}`);
         }
+
+        //Name der CA holen
         const caNameAusCcp = ccp.organizations[orgCcpName].certificateAuthorities[0];
+        //Informationen spezifischer CA holen
         const caInfo = ccp.certificateAuthorities[caNameAusCcp];
         if (!caInfo) throw new Error(`CA ${caNameAusCcp} nicht in ${ccpPfad}`);
 
+        //CA Client erstellen, verify: false da sonst Fehler
         const caClient = new FabricCAServices(caInfo.url, { trustedRoots: caInfo.tlsCACerts.pem, verify: false }, caInfo.caName);
 
-        const walletPfad = fabricUtils.getWalletPath(args.org, __dirname);
+        //Informationen holen
+        const walletPfad = fabricUtils.holeWalletPfad(args.org, __dirname);
         const wallet = await Wallets.newFileSystemWallet(walletPfad);
         const adminUserId = `admin${orgKurzName}`;
         const appUserId = `appUser${orgKurzName}_Integration`;
 
+        //Admin und Benutzer erstellen
         await fabricUtils.erstelleAdmin(wallet, caClient, args.org, adminUserId, orgKurzName);
         await fabricUtils.erstelleBenutzer(wallet, caClient, args.org, appUserId, adminUserId, `${orgKurzName.toLowerCase()}.department1`, orgKurzName);
 
+        //Verbindung mit Gateway herstellen
         gateway = new Gateway();
         await gateway.connect(ccp, {
             wallet,
             identity: appUserId,
             discovery: { enabled: true, asLocalhost: true }
         });
+
+        //Channel und Contract
         const network = await gateway.getNetwork('mychannel');
         const contract = network.getContract('dpp_quality');
 
+        //Infromationen zu Qualität zusammenstellen
         const qualitaetsDatenEintrag = {
             standardName: args.test,
             ergebnis: ergebnisFuerChaincode,
@@ -122,29 +183,38 @@ async function main() {
             bewertungsergebnis: bewertungsergebnisClient,
             kommentarBewertung: kommentarClient,
         };
+
+        //Umwandeln in String
         const qualitaetsDatenJSON = JSON.stringify(qualitaetsDatenEintrag);
 
-        console.log(`\n--> INTEGRATION Sende Qualitaetsdaten an Chaincode DPP ${args.dpp}`);
-        console.log(`    Payload ${qualitaetsDatenJSON}`);
-        await contract.submitTransaction('AufzeichnenTestergebnisse', args.dpp, qualitaetsDatenJSON, args.gln);
-        console.log(`Qualitaetsdaten fuer DPP ${args.dpp} gespeichert`);
+        //Ausgabe
+        console.log(`Verankere Sensordaten in ${args.dpp}`);
+        console.log(`    Inhalt: ${qualitaetsDatenJSON}`);
 
+        //Datein in Blockchain schreiben
+        await contract.submitTransaction('AufzeichnenTestergebnisse', args.dpp, qualitaetsDatenJSON, args.gln);
+
+        //Dpp auslesen bzw. überprüfen
         const dppBytes = await contract.evaluateTransaction('DPPAbfragen', args.dpp);
+        //Nutzbare Var erstellen
         const aktualisierterDpp = JSON.parse(dppBytes.toString());
-        console.log(`\nNeuer Status DPP ${args.dpp} ${aktualisierterDpp.status}`);
+        console.log(`Status des DPP ${args.dpp} ist ${aktualisierterDpp.status}`);
+
+
         if (aktualisierterDpp.status === "Gesperrt") {
-            console.error("ACHTUNG DPP wurde blockiert!");
+            console.error("DPP wurde blockiert!");
         } else if (aktualisierterDpp.status === "FreigegebenMitFehler") {
-            console.warn(`INFO DPP hat Probleme ${aktualisierterDpp.status}`);
+            console.warn(`DPP hat Fehler ${aktualisierterDpp.status}`);
         }
 
     } catch (error) {
-        console.error(`INTEGRATION FEHLER ${error.stack ? error.stack : error}`);
+        console.error(`Fehler in Skript: ${error.message || error}`);
         process.exit(1);
+
+        
     } finally {
         if (gateway) {
             await gateway.disconnect();
-            console.log('\nINTEGRATION Skript beendet.');
         }
     }
 }

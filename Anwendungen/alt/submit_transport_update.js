@@ -29,7 +29,7 @@ function parseArgs() {
 }
 
 // ***** BEGINN HILFSFUNKTIONEN (hier eingefügt) *****
-async function getWalletPath(orgMspId) { // Umbenannt zu getWalletPath für Klarheit
+async function holeWalletPfad(orgMspId) { // Umbenannt zu holeWalletPfad für Klarheit
     const orgShortName = orgMspId.replace('MSP', '');
     let walletDirName = `wallet${orgShortName.charAt(0).toUpperCase() + orgShortName.slice(1)}`;
      // Spezifische Wallet-Namen für den Prototyp
@@ -168,7 +168,7 @@ async function main() {
             throw new Error(`CA Info/tlsCACerts.pem unvollständig für ${caNameFromCcp} in ${ccpPath}.`);
         }
 
-        const walletStoragePath = await getWalletPath(args.org); // Verwende Hilfsfunktion
+        const walletStoragePath = await holeWalletPfad(args.org); // Verwende Hilfsfunktion
         const wallet = await Wallets.newFileSystemWallet(walletStoragePath);
         const adminUserId = `admin${orgShortName}`;
         const appUserId = `appUser${orgShortName}_TransportIntegration`; // Eindeutiger User
