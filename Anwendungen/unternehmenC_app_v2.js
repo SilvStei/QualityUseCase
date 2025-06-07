@@ -186,79 +186,98 @@ async function main() {
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(dichteTestDatenC), glnOrgC);
         let dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Dichteprüfung`, true);
 
-        
-        console.log(`\nCompound-DPP C ${dppIdC} vor Transport-Log\n`, JSON.stringify(dppCObj, null, 2));
+        //Zeigen wie es vor dem Transport ist
+        console.log(`Compound-DPP ${dppIdC} vor Transport`, JSON.stringify(dppCObj, null, 2));
 
+
+        //Transport simulieren
         if (dppCObj.status === "Freigegeben" || dppCObj.status === "FreigegebenMitFehler") {
+
+            //Empfänger
             const zielOrgD_MSP = 'Org4MSP';
 
-            console.log(`\n--> C DPPUebertragen (Initial) ${dppIdC} an ${zielOrgD_MSP}`);
+            console.log(`Transport von ${dppIdC} an ${zielOrgD_MSP} bevorstehend`);
+
+            //Senden des Dpp an Org4
             await contract.submitTransaction('DPPUebertragen', dppIdC, zielOrgD_MSP, glnOrgC);
-            console.log(`Initialer Transfer ${dppIdC} an ${zielOrgD_MSP} initiiert`);
+            console.log(`Transfer von ${dppIdC} an ${zielOrgD_MSP} initiiert`);
+
+            //Status des Dpp nach Übertrag
             dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, "Nach initialem Transfer an D", true);
 
-            console.log(`\n--> C-TRANSPORT Starte Simulation DPP ${dppIdC} (Profil ${transportProfilArg})`);
-            console.log(`   1. Rufe Transport_Generierung.js auf`);
+
+            //Simulieren der Transportsensoren
+            console.log(`Starte Transportsimulation des DPP ${dppIdC} mit Profil ${transportProfilArg})`);
+
+            //Logik wie bei Inline-Sensor (Skript A)
             let transportRohdatenPfad;
             try {
                 const generateCmd = `node Transport_Generierung.js ${dppIdC} ${transportProfilArg}`;
-                console.log(`       Befehl ${generateCmd}`);
+
+                //Abfangen des Outputs
                 const generateOutput = execSync(generateCmd, { encoding: 'utf8', stdio: 'pipe' });
-                console.log(generateOutput);
-                const match = generateOutput.match(/RAW_FILE_PATH=(.*)/);
-                if (match && match[1]) {
-                    transportRohdatenPfad = match[1].trim();
-                    console.log(`   Transport-Rohdaten ${transportRohdatenPfad}`);
+                //console.log(generateOutput);
+
+                //Suchen nach Dateipfad, alles nach = erfassen
+                const ergebnisSuche = generateOutput.match(/RAW_FILE_PATH=(.*)/);
+                if (ergebnisSuche && ergebnisSuche[1]) {
+
+                    //Leerezichen entfernen
+                    transportRohdatenPfad = ergebnisSuche[1].trim();
+
                 } else {
-                    throw new Error("Konnte RAW_FILE_PATH aus Transport_Generierung.js nicht extrahieren");
+                    throw new Error("Konnte Sensordatei nicht finden");
                 }
             } catch (e) {
                 console.error("Fehler bei Transport_Generierung.js", e.message);
                 throw e;
             }
 
-            console.log(`   2. Rufe Oracle_Transport.js Datei ${transportRohdatenPfad}`);
+
+            //Oracle versuchen
             try {
-                const submitTransportCmd = `node Oracle_Transport.js \
+                const transportCmd = `node Oracle_Transport.js \
                     --dpp ${dppIdC} \
                     --datei "${transportRohdatenPfad}" \
                     --org ${mspIdOrg3} \
                     --gln ${glnOrgC} \
-                    --system "LOGISTIK_C_TELEMATIK" \
-                    --zustaendig "Logistik C-D"`;
-                console.log("       Befehl", submitTransportCmd.replace(/\s+/g, ' '));
-                const submitTransportOutput = execSync(submitTransportCmd, { encoding: 'utf8', stdio: 'pipe' });
-                console.log(submitTransportOutput);
+                    --system "Fahrzeug CD" \
+                    --zustaendig "Logistik CD"`;
+
+                const transportOutput = execSync(transportCmd, {encoding: 'utf8', stdio: 'pipe' });
+                console.log("Ausgabe des Oracles");
+                console.log(transportOutput);
+
+
+
             } catch (e) {
-                console.error("Fehler bei Oracle_Transport.js", e.message);
-                console.warn("WARNUNG Transport-Update konnte nicht zum DPP hinzugefuegt werden");
+                console.error("Fehler bei Oracle", e.message);
             }
             
-            dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, "Nach Transport-Log Integration C", true);
-            console.log(`   DPP ${dppIdC} auf Weg zu ${zielOrgD_MSP} Status ${dppCObj.status}`);
+            dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, "Nach Transport", true);
+            console.log(`DPP ${dppIdC} auf dem Weg zu ${zielOrgD_MSP} mit Status ${dppCObj.status}`);
 
         } else {
-            console.error(`ACHTUNG Compound DPP ${dppIdC} Status ${dppCObj.status} NICHT transferierbar`);
+            console.error(`DPP ${dppIdC} hat Status ${dppCObj.status} und ist nicht transferierbar`);
         }
 
-        console.log(`DPP-ID für A: ${dppIdC}`);
+        console.log(`DPP-ID für C: ${dppIdC}`);
 
     } catch (error) {
-        console.error(`C FEHLER Hauptablauf ${error.stack ? error.stack : error}`);
+        console.error(`Fehler in Skript: ${error.message || error}`);
         process.exit(1);
     } finally {
         if (gateway) {
             await fabricUtils.trenneGateway(gateway);
-            console.log('\nC Gateway getrennt – Unternehmen C Demo beendet');
         }
     }
 }
 
 if (require.main === module) {
     if (process.argv.length < 4) { 
-        console.error("FEHLER DPP ID von A und B als Argumente angeben!");
+        console.error("DPP-ID von A und B müssen als Argumente angegeben werden");
         console.error("Aufruf z.B. node unternehmenC_app.js <DPP_ID_A> <DPP_ID_B> [TRANSPORT_PROFIL]");
-        console.error("Profile NORMAL, TEMP_HOCH, TEMP_NIEDRIG, ERSCHUETTERUNG");
+        console.error("Profile sind NORMAL, TEMP_HOCH, TEMP_NIEDRIG, ERSCHUETTERUNG");
         process.exit(1);
     }
     main();

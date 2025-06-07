@@ -125,7 +125,7 @@ async function main() {
                 //Leerzeichen entfernen sonst gabs warum auch immer Fehler
                 pfadRohdaten = ergebnisSuche[1].trim();
             } else {
-                throw new Error("Konnte Sensordatei nicht extrahieren");
+                throw new Error("Konnte Sensordatei nicht finden");
             }
         } catch (e) {
             console.error("Fehler bei MFI_Generierung.js", e.message);
@@ -150,16 +150,18 @@ async function main() {
                 --grenze_hoch ${mfiSpezifikationenA.grenzeHoch} \
                 --einheit "${mfiSpezifikationenA.einheit}"`;
 
-            const submitOutput = execSync(aufrufOracleSkript, { encoding: 'utf8', stdio: 'pipe' });
+            const outputAusgeben = execSync(aufrufOracleSkript, { encoding: 'utf8', stdio: 'pipe' });
             console.log("Ausgabe des Oracles");
-            console.log(submitOutput);
+            console.log(outputAusgeben);
+
+
         } catch (e) {
             console.error("Fehler beim Oracle", e.message);
             throw e;
         }
 
         //Nochmal Aufrufen
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach Inline-MFI Integration");
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach Inline-MFI");
 
         //Konstante für vis Test anlegen
         console.log(`Testergebnisse der QMS ${visTestNameKonst}) für DPP ${dppIdA}`);
@@ -212,7 +214,7 @@ async function main() {
         console.log(`DPP-ID für A: ${dppIdA}`);
 
     } catch (error) {
-        console.error(`Fehler in unternehmenA_app_v2.js: ${error.message || error}`);
+        console.error(`Fehler in Skript: ${error.message || error}`);
         process.exit(1);
     } finally {
         if (gateway) {

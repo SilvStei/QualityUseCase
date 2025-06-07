@@ -186,7 +186,7 @@ class DPPqualitaetContract extends Contract {
     const now = new Date();
 
 
-//Quelle finden
+//Commissioning Event basierend auf (https://www.gs1.org/docs/epc/EPCIS_Guideline.pdf)
     const commissioningEvt = new EPCISEvent({
       eventId: evtId('evt-create'),
       eventType: 'ObjectEvent',
@@ -292,7 +292,7 @@ class DPPqualitaetContract extends Contract {
     dpp.qualitaet.push(te);
 
 
-//Quelle angeben
+//EPCIS Event (basierend auf https://ref.gs1.org/docs/epcis/examples/)
     const qcEvent = new EPCISEvent({
       eventId: evtId(`evt-qc-${(te.standardName || 'unknown').replace(/\s|\//g, '_')}`),
       eventType: 'ObjectEvent',
@@ -367,7 +367,8 @@ class DPPqualitaetContract extends Contract {
     dpp.verankerteTransportLogs.push(logRef);
 
 
-	//auch EPCIS Event hinzufügen
+	//EPCIS Event (https://www.gs1nz.org/assets/Resources/Case-Studies/Supply-chain-traceability-Halal-meat-products.pdf)
+	//https://www.gs1.org/docs/epc/EPCIS_Guideline.pdf
     const logEvt = new EPCISEvent({
       eventId: evtId(`evt-log-${dpp.gs1Id.replace(/:/g, '_')}`),
       eventType: 'ObjectEvent',
@@ -435,7 +436,8 @@ class DPPqualitaetContract extends Contract {
     outDpp.inputDppIds = inputIds;
 
 
-	//Tranformationsevent (Quelle)
+	//Tranformationsevent (basierend auf https://ref.gs1.org/docs/epcis/examples/transformation_event_all_possible_fields.jsonld)
+	//bizStep commissioning?
     const tfEvt = new EPCISEvent({
       eventId: evtId('evt-tf'),
       eventType: 'TransformationEvent',
@@ -498,7 +500,7 @@ class DPPqualitaetContract extends Contract {
 	}
 
 
-	//EPCIS Shipping Event festlegen
+	//EPCIS Shipping Event festlegen (basierend auf https://www.gs1.org/docs/epc/EPCIS_Guideline.pdf)
     const shipEvt = new EPCISEvent({
       eventId: evtId('evt-ship'),
       eventType: 'ObjectEvent',
@@ -601,7 +603,8 @@ class DPPqualitaetContract extends Contract {
 	}
 
 
-//Event zum Empfang
+//Event zum Empfang, (basierend auf https://www.gs1.org/docs/epc/EPCIS_Guideline.pdf) 
+// https://ref.gs1.org/cbv/BizStep-receiving
     const now = new Date();
     const ackEvt = new EPCISEvent({
       eventId: evtId('evt-recv'),
@@ -623,6 +626,9 @@ class DPPqualitaetContract extends Contract {
     dpp.epcisEvents.push(ackEvt);
 
     if (inspektionErgebnis) {
+		
+		//EPCIS Event basierend auf (https://ref.gs1.org/cbv/BizStep-inspecting)
+		//(https://www.gs1.org/docs/epc/EPCIS_Guideline.pdf)
       const inspEvt = new EPCISEvent({
         eventId: evtId('evt-insp'),
         eventType: 'ObjectEvent',
