@@ -4,6 +4,9 @@
 //EPCIS events nochmal überprüfen und Quellen angeben
 //Überprüfen Funktionen wie Dpp geholt wird
 
+//Dieser Chaincode orientiert sich an der offiziellen Dokumentation (https://hyperledger-fabric.readthedocs.io/en/release-2.5/)
+//und dem Github-Repo https://github.com/hyperledger/fabric-samples/tree/main
+
 // benötigte Module importieren
 const { Contract } = require('fabric-contract-api');
 const { v4: uuidv4 } = require('uuid');
@@ -110,6 +113,7 @@ function evalStatus(dpp) {
     if (log.alarmZusammenfassung === 'JA') istNichtGeblockt = true;
   }
 
+//Dpp sperren wenn Fehler auftritt
   if (hatFehler) {
     dpp.status = STATUS.gesperrt; return;
   }
@@ -122,6 +126,8 @@ function evalStatus(dpp) {
 
 //Funktionen der Hyperledger Fabric Contract Klasse erben um Funktionalität mit Blockchain zu ermöglichen
 //dieser spezifischer Vertrag soll übergeben werden
+
+//Die Prorgrammierung der Klasse orientiert sich an https://hyperledger-fabric.readthedocs.io/en/release-2.2/developapps/smartcontract.html
 class DPPqualitaetContract extends Contract {
   constructor() {
 	//Elternklasse aufrufen und Vetragsnamen übergeben
@@ -137,6 +143,7 @@ class DPPqualitaetContract extends Contract {
   }
 
 // überprüfen ob Daten im Dpp existieren
+//Orientiert sich an https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js
   async existenzPruefen(ctx, dppId) {
     const data = await ctx.stub.getState(DPP_PREFIX + dppId);
     if (data && data.length > 0) {
@@ -148,18 +155,21 @@ class DPPqualitaetContract extends Contract {
 
 
 //Daten des DPP auf den Ledger schreiben
+//(https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js)
   async datenSchreiben(ctx, dpp) {
     await ctx.stub.putState(DPP_PREFIX + dpp.dppId, Buffer.from(JSON.stringify(dpp)));
   }
 
 
 //Ledger initialisieren
+//https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js
   async InitLedger() {
     return { success: 'Ledger ist initialisiert' };
   }
 
 
 //Erstellen eines DPP, mit Daten füttern und schreiben auf der Blockchain
+//Orientiert sich an https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js
   async ErstellenDPP(ctx, dppId, gs1Id, produktTypId, herstellerGln, batch, herstellDatum, specsJSON) {
     if (await this.existenzPruefen(ctx, dppId)) throw new Error(`Der DPP ${dppId} existiert bereits`);
     checkeGS1Standard(gs1Id);
@@ -227,6 +237,7 @@ class DPPqualitaetContract extends Contract {
 
 
 //Qualitätstests durchführen, Ergebnisse zum Dpp hinzufügen
+//Orientieren an https://github.com/hyperledger/fabric-samples/tree/main/asset-transfer-basic/chaincode-java
   async AufzeichnenTestergebnisse(ctx, dppId, testErgebnisJSON, pruefungsortGln) {
     const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppId);
 	if (!dppRohdaten || dppRohdaten.length === 0) {
@@ -354,6 +365,7 @@ class DPPqualitaetContract extends Contract {
 
 
 //Transport Sensordaten auf Blockchain schreiben
+//Orientieren an https://github.com/hyperledger/fabric-samples/tree/main/asset-transfer-basic/chaincode-java
   async TransportLogDateiVerankern(ctx, dppId, logJSON, standortGLN) {
     const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppId);
     if (!dppRohdaten.length) throw new Error(`DPP ${dppId} nicht gefunden`);
