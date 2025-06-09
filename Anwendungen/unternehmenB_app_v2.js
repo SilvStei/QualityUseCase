@@ -21,9 +21,10 @@ const caName2 = 'ca.org2.example.com';
 const adminIdOrg2 = 'adminOrg2';
 const appBenutzerIdOrg2 = 'appUserOrg2B';
 
-const glnOrgB = '4098765000007';
-const gs1FirmenPrefixB = '4098765';
-const stdProduktTypB = 'Glasfaser 30%';
+////Berechnet mit https://www.gs1-germany.de/produkte-services/pruefziffernrechner/
+const glnOrgB = '0000000000024';
+const gs1FirmenPrefixB = '9999992';
+const stdProduktTypB = 'Polypropylen mit Glasfaser 60%';
 
 const glasfaserTestNameKosnt = "Glasfaser-Gewichtsanteil";
 const mfiTestNameKonst_B = "Schmelzflussindex ";
@@ -45,7 +46,7 @@ async function main() {
         const caTLSCACerts = caInfo.tlsCACerts.pem;
 
         //Aufruf um CA zu erstellen
-        const ca = new FabricCAServices(caInfo.url, { trustedRoots: caTLSCACerts, verify: false }, caInfo.caName);
+        const ca = new FabricCAServices(caInfo.url, {trustedRoots: caTLSCACerts, verify: false}, caInfo.caName);
 
         const wallet = await Wallets.newFileSystemWallet(walletPfadB);
         
@@ -72,8 +73,8 @@ async function main() {
         const chargeB = `Charge_B_001`
 
         const spezifikationenB = [
-            { name: glasfaserTestNameKosnt, istNumerisch: true, grenzeNiedrig: 29.5, grenzeHoch: 30.5, einheit: 'wt-%', benoetigt: true },
-            { name: mfiTestNameKonst_B, istNumerisch: true, grenzeNiedrig: 8.0, grenzeHoch: 12.0, einheit: 'g/10 min', benoetigt: true },
+            { name: glasfaserTestNameKosnt, istNumerisch: true, grenzeNiedrig: 59.5, grenzeHoch: 60.5, einheit: 'Gew.-%', benoetigt: true },
+            { name: mfiTestNameKonst_B, istNumerisch: true, grenzeNiedrig: 2.0, grenzeHoch: 5.0, einheit: 'g/10 min', benoetigt: true },
             { name: feuchteTestNameKonst, istNumerisch: true, grenzeNiedrig: 0.0, grenzeHoch: 0.05, einheit: '%', benoetigt: false }
         ];
         const spezifikationenB_JSON = JSON.stringify(spezifikationenB);
@@ -98,8 +99,8 @@ async function main() {
 
         const testDatenGF = {
             standardName: glasfaserTestNameKosnt,
-            ergebnis: '30.1',
-            einheit: 'wt-%',
+            ergebnis: '60.1',
+            einheit: 'Gew.-%',
             systemId: 'Testsystem GF B1',
             zustaendiger: 'PrüferB',
 			offChainProtokoll: "",
@@ -120,7 +121,7 @@ async function main() {
 
         const testDatenMfi = {
             standardName: mfiTestNameKonst_B,
-            ergebnis: '9.8',
+            ergebnis: '3.8',
             einheit: 'g/10 min',
             systemId: 'B-MFI',
             zustaendiger: 'PrüferB',

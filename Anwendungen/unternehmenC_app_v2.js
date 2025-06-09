@@ -22,9 +22,10 @@ const adminIdOrg3 = 'adminOrg3';
 const appBenutzerIdOrg3 = 'appUserOrg3C';
 
 const produktTypIdC = 'Compound PP GF30';
-const glnOrgC = '4077777000005';
+////Berechnet mit https://www.gs1-germany.de/produkte-services/pruefziffernrechner/
+const glnOrgC = '0000000000031';
 const chargeCPrefix = 'CHARGE_C_COMPOUND_';
-const gs1FirmenPrefixC = '4077777';
+const gs1FirmenPrefixC = '9999993';
 const gs1ArtikelRefC = '056789';
 
 const compoundDichteTestName = "Compound Dichte";
@@ -90,7 +91,7 @@ async function main() {
         const network = await gateway.getNetwork('mychannel');
         const contract = network.getContract('dpp_quality');
 
-
+        console.log(`Produktionsauftrag aus MES erhalten`);
 
         console.log(`Empfange DPPs von A und B`);
         const inputDPPIDs = [dppIdVonA, dppIdVonB];
@@ -142,6 +143,7 @@ async function main() {
 
 
         console.log(`Compound-DPP ${dppIdC} erstellt`);
+        console.log(`Neue Daten an MES übertragen`);
         await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status des Compound DPP ${dppIdC}`, true);
 
 

@@ -237,7 +237,7 @@ class DPPqualitaetContract extends Contract {
 
 
 //Qualitätstests durchführen, Ergebnisse zum Dpp hinzufügen
-//Orientieren an https://github.com/hyperledger/fabric-samples/tree/main/asset-transfer-basic/chaincode-java
+//Transaktionen orientieren sich an https://github.com/hyperledger/fabric-samples/tree/main/asset-transfer-basic/chaincode-java
   async AufzeichnenTestergebnisse(ctx, dppId, testErgebnisJSON, pruefungsortGln) {
     const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppId);
 	if (!dppRohdaten || dppRohdaten.length === 0) {
@@ -245,12 +245,17 @@ class DPPqualitaetContract extends Contract {
 	}
     const dpp = JSON.parse(dppRohdaten.toString());
 
+    if (dpp.status === 'Gesperrt') {
+        throw new Error(`${dppId} ist gesperrt - keine neuen Tests möglich`);
+    }
+
     const TestErgebnisseDaten = umwandelnJSON(testErgebnisJSON, 'testErgebnisJSON ungültig');
     const te = new TestErgebnisse(TestErgebnisseDaten);
     te.zeit = te.zeit || new Date().toISOString();
     te.durchfuehrendeOrg = te.durchfuehrendeOrg || await this.mspidHolen(ctx);
 
 // evt mit find schreiben?
+//
     let gefundenerStandard = undefined;
 	for (const s of dpp.spezifikationen) {
 	if (s.name === te.standardName) {

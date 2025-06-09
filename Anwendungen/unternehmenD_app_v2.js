@@ -22,7 +22,8 @@ const mspIdOrg4 = 'Org4MSP';
 const caName4 = 'ca.org4.example.com';
 const adminIdOrg4 = 'adminOrg4';
 const appBenutzerIdOrg4 = 'appUserOrg4D';
-const glnOrgD = '4011111000009';
+////Berechnet mit https://www.gs1-germany.de/produkte-services/pruefziffernrechner/
+const glnOrgD = '0000000000048';
 
 async function main() {
     let gateway;
@@ -36,6 +37,7 @@ async function main() {
         }
 
 
+        console.log(`Wareneingang für Lieferung ${dppIdVonC} erhalten`);
         console.log(`Verarbeiten von ${dppIdVonC}`);
 
 
@@ -157,6 +159,7 @@ async function main() {
             eingangspruefungErgebnisD 
         );
         console.log(`Empfang des DPP ${dppIdVonC} durch D verarbeitet mit dem Ergebnis ${eingangspruefungErgebnisD}`);
+        console.log(`Wareneingang für DPP ${dppIdVonC} final bestätigt und im ERP-System verbucht`);
         
         //Nochmal den finalen Status abfragen
         const finalerDppBeiD = await fabricUtils.abfrageUndLogDPP(contract, dppIdVonC, `Finaler Zustand des DPP ${dppIdVonC} bei D`, true);

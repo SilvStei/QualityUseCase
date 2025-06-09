@@ -23,15 +23,16 @@ const caName1 = 'ca.org1.example.com';
 const adminIdOrg1 = 'adminOrg1';
 const appBenutzerIdOrg1 = 'appUserOrg1A';
 
-const produktTypIdA = 'POLYPROPYLEN_A1';
-const glnOrgA = '4012345000002';
+const produktTypIdA = 'Polypropylen_A1';
+//Berechnet mit https://www.gs1-germany.de/produkte-services/pruefziffernrechner/
+const glnOrgA = '0000000000017';
 const chargeAPrefix = 'CHARGE_A_';
-const gs1FirmenPrefixA = '4012345';
-const gs1ArtikelRefA = '076543';
+const gs1FirmenPrefixA = '9999991';
+//const gs1ArtikelRefA = '000001';
 
 const mfiTestNameKonst = "Schmelzflussindex";
 const visTestNameKonst = "Visuelle Prüfung der Granulatfarbe";
-const dichteTestNameKonst = "Dichte";
+const dichteTestNameKonst = "Dichtetest A1";
 
 
 //Array um Qualitätsgrenzen festzulegen
@@ -83,8 +84,8 @@ async function main() {
         const contract = network.getContract('dpp_quality');
 
         //eindeutige Kennzeichnugen festlegen
-        const dppIdA = `DPP_A_001`;
-        const chargeA = `Charge_A_001`;
+        const dppIdA = `DPP_A_005`;
+        const chargeA = `Charge_A_005`;
         const gs1IdA = `urn:epc:id:sgtin:0000001.000001.000001`;
 
         console.log(`DPP ${dppIdA} erstellen für Produkt ${produktTypIdA}`);
@@ -105,11 +106,11 @@ async function main() {
         console.log(`DPP ${dppIdA} ist angelegt mit GS1 ${gs1IdA}`);
 
         //Informationen zu DPP anzeigen
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach dem Erstellen: ");
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdA,``);
 
         //Sensordaten simulieren
-        const sensorQualitaetProfil = "GUT";
-        console.log(`Starten des simulierten Inline-MFI-Sensors mit Profil ${sensorQualitaetProfil}) für DPP ${dppIdA}`);
+        const sensorQualitaetProfil = "SCHLECHT";
+        console.log(`Starten des simulierten Inline-MFI-Sensors mit Profil ${sensorQualitaetProfil} für DPP ${dppIdA}`);
 
         let pfadRohdaten;
         try {
@@ -161,10 +162,10 @@ async function main() {
         }
 
         //Nochmal Aufrufen
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach Inline-MFI");
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "");
 
         //Konstante für vis Test anlegen
-        console.log(`Testergebnisse der QMS ${visTestNameKonst}) für DPP ${dppIdA}`);
+        console.log(`\nAufzeichnen der Prüfung: ${visTestNameKonst}`);
         const visuellTestDatenA = {
         standardName: visTestNameKonst,
 		ergebnis: "OK",
@@ -177,17 +178,17 @@ async function main() {
 
         //Daten auf Blockchain schreiben
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(visuellTestDatenA), glnOrgA);
-        console.log(`Daten der visuellen Prüfung gespeichert`);
-        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, `Nach dem QMS: (${visTestNameKonst})`);
+        console.log(`Daten aus QMS erfolgreich übermittelt`);
+        await fabricUtils.abfrageUndLogDPP(contract, dppIdA, ``);
 
-        console.log(`(${dichteTestNameKonst}) für DPP ${dppIdA}`);
+        console.log(`\nAufzeichnen Laborergebnis: ${dichteTestNameKonst}`);
 
         //Konstante für Dichteergebnisse
         const dichteTestDatenA = {
 		standardName: dichteTestNameKonst,
 		ergebnis: "0.91",
 		einheit: "g/cm3",
-		systemId: "Dichte Sensor 1",
+		systemId: "LIMS Gerät 1",
 		zustaendiger: "Anlage 1",
 		offChainProtokoll: "", 
 		dateiHash: "",       
@@ -195,8 +196,8 @@ async function main() {
 
         //Testergebnisse schreiben
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(dichteTestDatenA), glnOrgA);
-        console.log(`Dichte Daten gespeichert`);
-        const dppFinal = await fabricUtils.abfrageUndLogDPP(contract, dppIdA, `Nach ${dichteTestNameKonst}`);
+        console.log(`Daten aus LIMS erfolgreich übermittelt`);
+        const dppFinal = await fabricUtils.abfrageUndLogDPP(contract, dppIdA, ``);
 
 
         //Ausgabe aller Ergebnisse, mit 2 sonst nicht gut lesbar
@@ -206,7 +207,7 @@ async function main() {
             const zielOrgC_MSP = 'Org3MSP';
             console.log(`Senden des DPP ${dppIdA} von ${mspIdOrg1} an ${zielOrgC_MSP}`);
             await contract.submitTransaction('DPPUebertragen', dppIdA, zielOrgC_MSP, glnOrgA);
-            await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Nach Transfer an C");
+            await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "Finaler Status");
         } else {
             console.error(`DPP ${dppIdA} hat Status ${dppFinal.status} und kann nicht transferiert werden`);
         }

@@ -14,7 +14,7 @@ const crypto = require('crypto');
 //Konsolenargumente lesen und bearbeiten
 function parseArgumente() {
     const parser = new ArgumentParser({
-        beschreibung: 'Sensordaten verarbeiten und hashen'
+        description: 'Sensordaten verarbeiten und hashen'
     });
     parser.add_argument('--dpp', { required: true });
     parser.add_argument('--datei', { required: true });
@@ -36,8 +36,7 @@ async function main() {
 
 
     const args = parseArgumente();
-    console.log(`Verarbeite Daten aus ${args.datei}`);
-    console.log(`  DPP ${args.dpp}, Test "${args.test}", Org ${args.org}`);
+console.log(`Oracle verarbeitet Test '${args.test}' für DPP ${args.dpp}`);
 
     let gateway;
 
@@ -53,7 +52,6 @@ async function main() {
 
         //Hash erzeugen um Unveränderlichkeit bezeugen zu können
 		const dateiHash = crypto.createHash('sha256').update(dateiInhalt).digest('hex');
-        console.log(`  Hash ist ${dateiHash}`);
 
         //Leerzeichen entfernen und zeilenweise Strings
         const zeilen = dateiInhalt.trim().split('\n');
@@ -104,6 +102,7 @@ async function main() {
         const einheitFuerChaincode = args.einheit || "";
 
         //Schauen ob Grenzwerte zahlen sind
+        let bewertungsText = `Ergebnis: ${durchschnitt} ${args.einheit}.`;
         if (typeof args.grenze_niedrig === 'number' && typeof args.grenze_hoch === 'number') {
             //Schauen ob außerhalb Grenzwerte
             if (durchschnitt < args.grenze_niedrig || durchschnitt > args.grenze_hoch) {
@@ -111,6 +110,8 @@ async function main() {
             } else {
                 console.log(`   Durchschnitt ${durchschnitt} innerhalb Grenzen (${args.grenze_niedrig}-${args.grenze_hoch})`);
             }
+
+        console.log(bewertungsText);
 
         //Schauen ob überhaupt Wert mitgeliefert
         } else if (args.wert_erwartet) {
@@ -122,7 +123,7 @@ async function main() {
             }
         }
 
-        console.log(`Ergebnis ist ${durchschnitt}, Kommentar ${kommentarClient}`);
+    
 
         const orgKurzName = args.org.replace('MSP', '');
 
@@ -188,8 +189,7 @@ async function main() {
         const qualitaetsDatenJSON = JSON.stringify(qualitaetsDatenEintrag);
 
         //Ausgabe
-        console.log(`Verankere Sensordaten in ${args.dpp}`);
-        console.log(`    Inhalt: ${qualitaetsDatenJSON}`);
+        console.log(`Übermittle Testergebnis an Blockchain`);
 
         //Datein in Blockchain schreiben
         await contract.submitTransaction('AufzeichnenTestergebnisse', args.dpp, qualitaetsDatenJSON, args.gln);
@@ -198,7 +198,7 @@ async function main() {
         const dppBytes = await contract.evaluateTransaction('DPPAbfragen', args.dpp);
         //Nutzbare Var erstellen
         const aktualisierterDpp = JSON.parse(dppBytes.toString());
-        console.log(`Status des DPP ${args.dpp} ist ${aktualisierterDpp.status}`);
+        console.log(`Neuer Status des DPP: ${aktualisierterDpp.status}`);
 
 
         if (aktualisierterDpp.status === "Gesperrt") {

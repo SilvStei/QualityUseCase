@@ -16,7 +16,7 @@ async function pruefeWallet(wallet, identLabel) {
 async function erstelleAdmin(wallet, caClient, mspId, adminBenutzerId, orgNameLog = '') {
     try {
         if (await pruefeWallet(wallet, adminBenutzerId)) {
-            console.log(`Admin "${adminUserId}" ist bereits im Wallet registriert.`);
+            console.log(`Admin "${adminBenutzerId}" ist bereits im Wallet registriert.`);
             return;
         }
 
@@ -88,7 +88,7 @@ async function trenneGateway(gateway) {
 
 //Zustand des DPP abfragen
 async function abfrageUndLogDPP(contract, dppId, kontextNachricht, includeOwner = false) {
-    console.log(`Info ${kontextNachricht} und Status ${dppId}`);
+    console.log(`Kommentar: ${kontextNachricht} für ${dppId}`);
 
     //Abfragen des Dpp im Ledger
     const dppBytes = await contract.evaluateTransaction('DPPAbfragen', dppId);
@@ -104,7 +104,7 @@ async function abfrageUndLogDPP(contract, dppId, kontextNachricht, includeOwner 
     //Schauen ob noch Prüfungen offen sind
     if (dpp.offenePflichtpruefungen && dpp.offenePflichtpruefungen.length > 0) {
         //Ausgeben welche Prüfungen
-        console.log(`Noch offene Pflichtprüfungen ${dpp.offenePflichtpruefungen.join(', ')}`);
+        console.log(`Offene Pflichtprüfungen: ${dpp.offenePflichtpruefungen.join(', ')}\n`);
     }
     //Warunung wenn Gesperrt
     if (dpp.status === "Gesperrt") {

@@ -76,7 +76,7 @@ async function main() {
 
     try {
         fs.writeFileSync(ausgabePfad, csvInhalt);
-        console.log(`RAW_FILE_PATH=${ausgabePfad}`);
+       console.log(`RAW_FILE_PATH=${ausgabePfad}`);
     } catch (err) {
         console.error(`Fehler beim Schreiben der Datei ${err}`);
         process.exit(1);
