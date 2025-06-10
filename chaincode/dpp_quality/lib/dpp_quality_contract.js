@@ -106,8 +106,8 @@ function evalStatus(dpp) {
   let istNichtGeblockt = false;
 
   for (const te of dpp.qualitaet) {
-    if (te.bewertungsergebnis === 'FEHLGESCHLAGEN') { hatFehler = true; break; }
-    if (te.bewertungsergebnis === 'INFO_KEIN_STANDARD') istNichtGeblockt = true;
+    if (te.bewertung === 'FEHLGESCHLAGEN') { hatFehler = true; break; }
+    if (te.bewertung === 'INFO_KEIN_STANDARD') istNichtGeblockt = true;
   }
   for (const log of dpp.verankerteTransportLogs) {
     if (log.alarmZusammenfassung === 'JA') istNichtGeblockt = true;
@@ -144,8 +144,8 @@ class DPPqualitaetContract extends Contract {
 
 // überprüfen ob Daten im Dpp existieren
 //Orientiert sich an https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js
-  async existenzPruefen(ctx, dppId) {
-    const data = await ctx.stub.getState(DPP_PREFIX + dppId);
+  async existenzPruefen(ctx, dppID) {
+    const data = await ctx.stub.getState(DPP_PREFIX + dppID);
     if (data && data.length > 0) {
 	return true;
 	} else {
@@ -157,7 +157,7 @@ class DPPqualitaetContract extends Contract {
 //Daten des DPP auf den Ledger schreiben
 //(https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js)
   async datenSchreiben(ctx, dpp) {
-    await ctx.stub.putState(DPP_PREFIX + dpp.dppId, Buffer.from(JSON.stringify(dpp)));
+    await ctx.stub.putState(DPP_PREFIX + dpp.dppID, Buffer.from(JSON.stringify(dpp)));
   }
 
 
@@ -170,9 +170,9 @@ class DPPqualitaetContract extends Contract {
 
 //Erstellen eines DPP, mit Daten füttern und schreiben auf der Blockchain
 //Orientiert sich an https://github.com/hyperledger/fabric-samples/blob/main/asset-transfer-basic/chaincode-javascript/lib/assetTransfer.js
-  async ErstellenDPP(ctx, dppId, gs1Id, produktTypId, herstellerGln, batch, herstellDatum, specsJSON) {
-    if (await this.existenzPruefen(ctx, dppId)) throw new Error(`Der DPP ${dppId} existiert bereits`);
-    checkeGS1Standard(gs1Id);
+  async ErstellenDPP(ctx, dppID, gs1ID, produktTypID, herstellerGLN, charge, herstellDatum, specsJSON) {
+    if (await this.existenzPruefen(ctx, dppID)) throw new Error(`Der DPP ${dppID} existiert bereits`);
+    checkeGS1Standard(gs1ID);
 
 
 //JSON nutzbar machen
@@ -204,29 +204,29 @@ class DPPqualitaetContract extends Contract {
       eventTimeZoneOffset: timezone(),
       bizStep: CBV.bizstep.commissioning,
       action: 'ADD',
-      epcList: [gs1Id],
+      epcList: [gs1ID],
       disposition: CBV.disp.active,
       inputEPCList: [],
       outputEPCList: [],
-      readPoint: sgln(herstellerGln),
-      bizLocation: sgln(herstellerGln),
+      readPoint: sgln(herstellerGLN),
+      bizLocation: sgln(herstellerGLN),
       extensions: {},
     });
 
     const dpp = new DPP({
-      dppId,
-      gs1Id,
-      produktTypId,
-      herstellerGln,
-      batch,
+      dppID,
+      gs1ID,
+      produktTypID,
+      herstellerGLN,
+      charge,
       herstellDatum,
-      besitzerOrg: owner,
+      besitzerOrganisation: owner,
       status: STATUS.entwurf,
       spezifikationen: specs,
       offenePflichtpruefungen: offeneChecks,
       qualitaet: [],
       verankerteTransportLogs: [],
-      inputDppIds: [],
+      vorproduktDppIDs: [],
       epcisEvents: [commissioningEvt],
     });
 
@@ -238,27 +238,27 @@ class DPPqualitaetContract extends Contract {
 
 //Qualitätstests durchführen, Ergebnisse zum Dpp hinzufügen
 //Transaktionen orientieren sich an https://github.com/hyperledger/fabric-samples/tree/main/asset-transfer-basic/chaincode-java
-  async AufzeichnenTestergebnisse(ctx, dppId, testErgebnisJSON, pruefungsortGln) {
-    const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppId);
+  async AufzeichnenTestergebnisse(ctx, dppID, testErgebnisJSON, pruefungsortGln) {
+    const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppID);
 	if (!dppRohdaten || dppRohdaten.length === 0) {
-	throw new Error(`DPP ${dppId} nicht gefunden`);
+	throw new Error(`DPP ${dppID} nicht gefunden`);
 	}
     const dpp = JSON.parse(dppRohdaten.toString());
 
     if (dpp.status === 'Gesperrt') {
-        throw new Error(`${dppId} ist gesperrt - keine neuen Tests möglich`);
+        throw new Error(`${dppID} ist gesperrt - keine neuen Tests möglich`);
     }
 
     const TestErgebnisseDaten = umwandelnJSON(testErgebnisJSON, 'testErgebnisJSON ungültig');
     const te = new TestErgebnisse(TestErgebnisseDaten);
-    te.zeit = te.zeit || new Date().toISOString();
-    te.durchfuehrendeOrg = te.durchfuehrendeOrg || await this.mspidHolen(ctx);
+    te.zeitstempel = te.zeitstempel || new Date().toISOString();
+    te.durchfuehrendeOrganisation = te.durchfuehrendeOrganisation || await this.mspidHolen(ctx);
 
 // evt mit find schreiben?
 //
     let gefundenerStandard = undefined;
 	for (const s of dpp.spezifikationen) {
-	if (s.name === te.standardName) {
+	if (s.name === te.pruefungsName) {
 		gefundenerStandard = s;
 		break;
 		}
@@ -266,7 +266,7 @@ class DPPqualitaetContract extends Contract {
 	const std = gefundenerStandard;
 	
 //schauen ob Bewertung schon final ist
-    const clientBewertung = ['BESTANDEN', 'FEHLGESCHLAGEN'].includes(te.bewertungsergebnis);
+    const clientBewertung = ['BESTANDEN', 'FEHLGESCHLAGEN'].includes(te.bewertung);
 
 
 //falls keine Bewertung soll diese durch Vergleich mit Vergleich gegen Grenzwerten im Dpp erstellt werden
@@ -275,31 +275,31 @@ class DPPqualitaetContract extends Contract {
 	  
 	  //schauen ob Grenzwerte vorliegen und bewerten
       if (!std) {
-        te.bewertungsergebnis = 'INFO_KEIN_STANDARD';
-        te.kommentarBewertung = `Es gibt keinen Standard für den Test '${te.standardName}'`;
+        te.bewertung = 'INFO_KEIN_STANDARD';
+        te.kommentarBewertung = `Es gibt keinen Standard für den Test '${te.pruefungsName}'`;
 		
 		//numerische Tests
       } else if (std.istNumerisch) {
-        const val = parseFloat(te.ergebnis);
+        const val = parseFloat(te.messwert);
         if (Number.isNaN(val)) {
-          te.bewertungsergebnis = 'FEHLGESCHLAGEN';
-          te.kommentarBewertung = `Ergebnis '${te.ergebnis}' ist nicht numerisch.`;
+          te.bewertung = 'FEHLGESCHLAGEN';
+          te.kommentarBewertung = `Ergebnis '${te.messwert}' ist nicht numerisch.`;
 		  
         } else if (val < std.grenzeNiedrig || val > std.grenzeHoch) {
-          te.bewertungsergebnis = 'FEHLGESCHLAGEN';
+          te.bewertung = 'FEHLGESCHLAGEN';
           te.kommentarBewertung = `Wert ${val.toFixed(4)} liegt außerhalb Toleranz [${std.grenzeNiedrig}, ${std.grenzeHoch}] ${std.einheit}`;
 		  
         } else {
-          te.bewertungsergebnis = 'BESTANDEN';
+          te.bewertung = 'BESTANDEN';
         }
 		
 		//nichtnumerische Tests
       } else {
-        if ((te.ergebnis || '').toLowerCase() === (std.wertErwartet || '').toLowerCase()) {
-          te.bewertungsergebnis = 'BESTANDEN';
+        if ((te.messwert || '').toLowerCase() === (std.wertErwartet || '').toLowerCase()) {
+          te.bewertung = 'BESTANDEN';
         } else {
-          te.bewertungsergebnis = 'FEHLGESCHLAGEN';
-          te.kommentarBewertung = `Erwartet wird '${std.wertErwartet}' aber '${te.ergebnis}' erhalten`;
+          te.bewertung = 'FEHLGESCHLAGEN';
+          te.kommentarBewertung = `Erwartet wird '${std.wertErwartet}' aber '${te.messwert}' erhalten`;
         }
       }
     }
@@ -310,16 +310,16 @@ class DPPqualitaetContract extends Contract {
 
 //EPCIS Event (basierend auf https://ref.gs1.org/docs/epcis/examples/)
     const qcEvent = new EPCISEvent({
-      eventId: evtId(`evt-qc-${(te.standardName || 'unknown').replace(/\s|\//g, '_')}`),
+      eventId: evtId(`evt-qc-${(te.pruefungsName || 'unknown').replace(/\s|\//g, '_')}`),
       eventType: 'ObjectEvent',
-      eventTime: te.zeit,
+      eventTime: te.zeitstempel,
       eventTimeZoneOffset: timezone(),
       bizStep: CBV.bizstep.inspecting,
       action: 'OBSERVE',
-      epcList: [dpp.gs1Id],
-      disposition: te.bewertungsergebnis === 'BESTANDEN'
+      epcList: [dpp.gs1ID],
+      disposition: te.bewertung === 'BESTANDEN'
         ? CBV.disp.conformant
-        : ['FEHLGESCHLAGEN', 'INFO_KEIN_STANDARD'].includes(te.bewertungsergebnis)
+        : ['FEHLGESCHLAGEN', 'INFO_KEIN_STANDARD'].includes(te.bewertung)
           ? CBV.disp.nonConformant
           : CBV.disp.active,
       inputEPCList: [],
@@ -334,8 +334,8 @@ class DPPqualitaetContract extends Contract {
 
 
 	// Tests von Liste abhaken wenn bestanden
-	if (std && std.benoetigt && te.bewertungsergebnis === 'BESTANDEN') {
-	  const erledigterTestName = te.standardName;
+	if (std && std.benoetigt && te.bewertung === 'BESTANDEN') {
+	  const erledigterTestName = te.pruefungsName;
 	  const neueListeOffenerPruefungen = [];
 	  for (const alterTestName of dpp.offenePflichtpruefungen) {
 		if (alterTestName !== erledigterTestName) {
@@ -351,29 +351,29 @@ class DPPqualitaetContract extends Contract {
 
 
 	//Event setzen falls fehlgeschlagener Test, Informationen zum Test mitgeben
-    if (te.bewertungsergebnis === 'FEHLGESCHLAGEN') {
+    if (te.bewertung === 'FEHLGESCHLAGEN') {
       ctx.stub.setEvent('qualityalarm', Buffer.from(JSON.stringify({
-        dppId,
-        gs1Id: dpp.gs1Id,
-        standardName: te.standardName,
-        ergebnis: te.ergebnis,
-        bewertungsergebnis: te.bewertungsergebnis,
+        dppID,
+        gs1ID: dpp.gs1ID,
+        pruefungsName: te.pruefungsName,
+        messwert: te.messwert,
+        bewertung: te.bewertung,
         kommentarBewertung: te.kommentarBewertung,
-        zeit: te.zeit,
+        zeitstempel: te.zeitstempel,
       })));
     }
 
 //alle Infos des Dpp auf Blockchain schreiben
     await this.datenSchreiben(ctx, dpp);
-    return { success: `Ergebnisse der Tests für ${dppId} gespeichert` };
+    return { success: `Ergebnisse der Tests für ${dppID} gespeichert` };
   }
 
 
 //Transport Sensordaten auf Blockchain schreiben
 //Orientieren an https://github.com/hyperledger/fabric-samples/tree/main/asset-transfer-basic/chaincode-java
-  async TransportLogDateiVerankern(ctx, dppId, logJSON, standortGLN) {
-    const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppId);
-    if (!dppRohdaten.length) throw new Error(`DPP ${dppId} nicht gefunden`);
+  async TransportLogDateiVerankern(ctx, dppID, logJSON, standortGLN) {
+    const dppRohdaten = await ctx.stub.getState(DPP_PREFIX + dppID);
+    if (!dppRohdaten.length) throw new Error(`DPP ${dppID} nicht gefunden`);
     const dpp = JSON.parse(dppRohdaten.toString());
 
 	//Transportinformationen zum Dpp hinzufügen
@@ -387,13 +387,13 @@ class DPPqualitaetContract extends Contract {
 	//EPCIS Event (https://www.gs1nz.org/assets/Resources/Case-Studies/Supply-chain-traceability-Halal-meat-products.pdf)
 	//https://www.gs1.org/docs/epc/EPCIS_Guideline.pdf
     const logEvt = new EPCISEvent({
-      eventId: evtId(`evt-log-${dpp.gs1Id.replace(/:/g, '_')}`),
+      eventId: evtId(`evt-log-${dpp.gs1ID.replace(/:/g, '_')}`),
       eventType: 'ObjectEvent',
       eventTime: logRef.zeitpunktVerankerung,
       eventTimeZoneOffset: timezone(),
       bizStep: CBV.bizstep.storing,
       action: 'ADD',
-      epcList: [dpp.gs1Id],
+      epcList: [dpp.gs1ID],
       disposition: logRef.alarmZusammenfassung === 'JA' ? CBV.disp.nonConformantTransit : CBV.disp.inTransit,
       inputEPCList: [],
       outputEPCList: [],
@@ -408,19 +408,19 @@ class DPPqualitaetContract extends Contract {
 	//Status evaluieren falls geändert werden soll, dann schreiben
     evalStatus(dpp);
     await this.datenSchreiben(ctx, dpp);
-    return { success: ` Der Log des Transports für ${dppId} wurde verankert` };
+    return { success: ` Der Log des Transports für ${dppID} wurde verankert` };
   }
 
 
 //transformieren der Dpp um Compundierer abzubilden
-  async dppTransformieren(ctx, outputId, outputGs1, outputTypId, aktuelleGln, batch, herstellDatum, inputIdsJSON, outSpecsJSON, initialTestJSON) {
+  async dppTransformieren(ctx, outputId, outputGs1, outputTypId, aktuelleGln, charge, herstellDatum, inputIdsJSON, outSpecsJSON, initialTestJSON) {
     if (await this.existenzPruefen(ctx, outputId)) throw new Error(`Output DPP ${outputId} existiert bereits`);
     checkeGS1Standard(outputGs1);
     const msp = await this.mspidHolen(ctx);
 
 	//Json in Array umwandeln
-  const inputIds = umwandelnJSON(inputIdsJSON, 'InputDPPIDs JSON ungültig');
-  const inputgs1Ids = [];
+  const inputIds = umwandelnJSON(inputIdsJSON, 'vorproduktDppIDs JSON ungültig');
+  const inputgs1IDs = [];
 
   for (const id of inputIds) {
     const buf = await ctx.stub.getState(DPP_PREFIX + id);
@@ -437,7 +437,7 @@ class DPPqualitaetContract extends Contract {
 		}
 	  
 	  //GS1-Id in liste packen
-      inputgs1Ids.push(inp.gs1Id);
+      inputgs1IDs.push(inp.gs1ID);
 	  
 	  //inputDpp löschen da transformiert
       inp.status = `${STATUS.deleted}${outputId}`;
@@ -447,10 +447,10 @@ class DPPqualitaetContract extends Contract {
 	//Umwandeln der outSpecs in nutzbare Form
     const outSpecs = umwandelnJSON(outSpecsJSON, 'Spezifikationen des Outputs ungültig');
 	//neuen Dpp erstellen
-    const outDpp = await this.ErstellenDPP(ctx, outputId, outputGs1, outputTypId, aktuelleGln, batch, herstellDatum, JSON.stringify(outSpecs));
+    const outDpp = await this.ErstellenDPP(ctx, outputId, outputGs1, outputTypId, aktuelleGln, charge, herstellDatum, JSON.stringify(outSpecs));
 
 	//outputDpp die inputDpps hinzufügen
-    outDpp.inputDppIds = inputIds;
+    outDpp.vorproduktDppIDs = inputIds;
 
 
 	//Tranformationsevent (basierend auf https://ref.gs1.org/docs/epcis/examples/transformation_event_all_possible_fields.jsonld)
@@ -464,7 +464,7 @@ class DPPqualitaetContract extends Contract {
     action: 'OBSERVE',
     epcList: [],
     disposition: '',
-    inputEPCList: inputgs1Ids,
+    inputEPCList: inputgs1IDs,
     outputEPCList: [outputGs1],
     readPoint: sgln(aktuelleGln),
     bizLocation: sgln(aktuelleGln),
@@ -475,8 +475,8 @@ class DPPqualitaetContract extends Contract {
     if (initialTestJSON && initialTestJSON !== '{}') {
 	  //umwandeln in 
       const initTE = new TestErgebnisse(umwandelnJSON(initialTestJSON, 'InitialTest JSON ungültig'));
-      initTE.zeit = initTE.zeit || new Date().toISOString();
-      initTE.durchfuehrendeOrg = initTE.durchfuehrendeOrg || msp;
+      initTE.zeitstempel = initTE.zeitstempel || new Date().toISOString();
+      initTE.durchfuehrendeOrganisation = initTE.durchfuehrendeOrganisation || msp;
 	  
 	  //Testergbnis zu den Extensions hinzufügen
       tfEvt.extensions.transformationsTest = initTE;
@@ -484,34 +484,34 @@ class DPPqualitaetContract extends Contract {
       outDpp.qualitaet.push(initTE);
 
 //Regeln aus Spezifikationen holen um Tests bewerten zu können      
-const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
+const std = outDpp.spezifikationen.find(s => s.name === initTE.pruefungsName);
 
         //schauen ob Testergebnis keine Bewertung hat
-        if (!initTE.bewertungsergebnis) {
+        if (!initTE.bewertung) {
           //gibt es Standard für Bewertung
             if (std && std.istNumerisch) {
               //zum Nutzen umwandeln in Zahl
-                const val = parseFloat(initTE.ergebnis);
+                const val = parseFloat(initTE.messwert);
                 if (!Number.isNaN(val) && val >= std.grenzeNiedrig && val <= std.grenzeHoch) {
-                    initTE.bewertungsergebnis = 'BESTANDEN';
+                    initTE.bewertung = 'BESTANDEN';
                 } else {
-                    initTE.bewertungsergebnis = 'FEHLGESCHLAGEN';
+                    initTE.bewertung = 'FEHLGESCHLAGEN';
                     initTE.kommentarBewertung = `Wert ${val} außerhalb Toleranz [${std.grenzeNiedrig}, ${std.grenzeHoch}]`;
                 }
             } else if (std) { 
-                if ((initTE.ergebnis || '').toLowerCase() === (std.wertErwartet || '').toLowerCase()) {
-                    initTE.bewertungsergebnis = 'BESTANDEN';
+                if ((initTE.messwert || '').toLowerCase() === (std.wertErwartet || '').toLowerCase()) {
+                    initTE.bewertung = 'BESTANDEN';
                 } else {
-                    initTE.bewertungsergebnis = 'FEHLGESCHLAGEN';
+                    initTE.bewertung = 'FEHLGESCHLAGEN';
                 }
             } else {
-                initTE.bewertungsergebnis = 'INFO_KEIN_STANDARD';
+                initTE.bewertung = 'INFO_KEIN_STANDARD';
              }
         }
         
         //Falls Test bestanden aus offener Liste streichen
-        if (std && std.benoetigt && initTE.bewertungsergebnis === 'BESTANDEN') {
-            const erledigterTestName = initTE.standardName;
+        if (std && std.benoetigt && initTE.bewertung === 'BESTANDEN') {
+            const erledigterTestName = initTE.pruefungsName;
             //Bestandenen Test aus Liste mit offnen Prüfungen filtern
             outDpp.offenePflichtpruefungen = outDpp.offenePflichtpruefungen.filter(name => name !== erledigterTestName);
         }
@@ -531,24 +531,24 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
 
 
 // senden eines Dpp an neues Unternehmen/Eigentümer
-  async DPPUebertragen(ctx, dppId, neuerOwnerMsp, senderGln) {
+  async DPPUebertragen(ctx, dppID, neuerOwnerMsp, senderGln) {
 	  
 	  //Dpp holen und nutzbar machen
-    const buf = await ctx.stub.getState(DPP_PREFIX + dppId);
-    if (!buf.length) throw new Error(`DPP ${dppId} nicht gefunden`);
+    const buf = await ctx.stub.getState(DPP_PREFIX + dppID);
+    if (!buf.length) throw new Error(`DPP ${dppID} nicht gefunden`);
     const dpp = JSON.parse(buf.toString());
 	
 	//Id des Senders holen
     const absender = await this.mspidHolen(ctx);
 
-    if (dpp.besitzerOrg !== absender) throw new Error(`Sender ist nicht Eigentümer des DPP (Owner ${dpp.besitzerOrg})`);
+    if (dpp.besitzerOrganisation !== absender) throw new Error(`Sender ist nicht Eigentümer des DPP (Owner ${dpp.besitzerOrganisation})`);
     if (absender === neuerOwnerMsp) throw new Error('Absender und Empfänger sind gleich');
 	
 	//Schauen ob Dpp überhaupt transferierbar ist
     const istGesperrt = (dpp.status === STATUS.gesperrt);
 	const istFreigegeben = (dpp.status === STATUS.freigegeben) || (dpp.status === STATUS.freigegebenMitFehler);
 	if (istGesperrt || !istFreigegeben) {
-	  throw new Error(`DPP ${dppId} (Status ist ${dpp.status}); DPP ist nicht transferierbar`);
+	  throw new Error(`DPP ${dppID} (Status ist ${dpp.status}); DPP ist nicht transferierbar`);
 	}
 
 
@@ -560,7 +560,7 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
       eventTimeZoneOffset: timezone(),
       bizStep: CBV.bizstep.shipping,
       action: 'OBSERVE',
-      epcList: [dpp.gs1Id],
+      epcList: [dpp.gs1ID],
       disposition: CBV.disp.inTransit,
       inputEPCList: [],
       outputEPCList: [],
@@ -573,25 +573,25 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
     dpp.epcisEvents.push(shipEvt);
 
 	//Neuen Besitzer auf Dpp setzen
-    dpp.besitzerOrg = neuerOwnerMsp;
+    dpp.besitzerOrganisation = neuerOwnerMsp;
     dpp.status = `${STATUS.gesendetZu}${neuerOwnerMsp}`;
     await this.datenSchreiben(ctx, dpp);
-    return { success: `DPP ${dppId} an ${neuerOwnerMsp} übertragen` };
+    return { success: `DPP ${dppID} an ${neuerOwnerMsp} übertragen` };
   }
 
 
 //Empfangen und Fehler/Qualität überprüfen
-  async empfangBestaetigen(ctx, dppId, empfaengerGln, prueferErgebnis) {
-    const buf = await ctx.stub.getState(DPP_PREFIX + dppId);
-    if (!buf.length) throw new Error(`DPP ${dppId} nicht gefunden`);
+  async empfangBestaetigen(ctx, dppID, empfaengerGln, prueferErgebnis) {
+    const buf = await ctx.stub.getState(DPP_PREFIX + dppID);
+    if (!buf.length) throw new Error(`DPP ${dppID} nicht gefunden`);
     const dpp = JSON.parse(buf.toString());
 
 
 	//schauen ob Empfänger passt
     const empfaengerMsp = await this.mspidHolen(ctx);
     const erwarteterStatus = `${STATUS.gesendetZu}${empfaengerMsp}`;
-    if (dpp.besitzerOrg !== empfaengerMsp || !dpp.status.startsWith(erwarteterStatus)) {
-      throw new Error(`Empfang nicht erlaubt (Owner ${dpp.besitzerOrg} - Status ${dpp.status}) liegt vor`);
+    if (dpp.besitzerOrganisation !== empfaengerMsp || !dpp.status.startsWith(erwarteterStatus)) {
+      throw new Error(`Empfang nicht erlaubt (Owner ${dpp.besitzerOrganisation} - Status ${dpp.status}) liegt vor`);
     }
 
     dpp.status = `${STATUS.akzeptiertVon}${empfaengerMsp}`;
@@ -604,12 +604,12 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
 		
 		//neues Objekt für Eingangsprüfung
       inspektionErgebnis = new TestErgebnisse({
-        standardName: 'Eingangspruefung',
-        ergebnis: prueferErgebnis,
-        zeit: new Date().toISOString(),
-        durchfuehrendeOrg: empfaengerMsp,
+        pruefungsName: 'Eingangspruefung',
+        messwert: prueferErgebnis,
+        zeitstempel: new Date().toISOString(),
+        durchfuehrendeOrganisation: empfaengerMsp,
         systemId: 'ManuellePruefungEmpfaenger',
-        bewertungsergebnis: prueferErgebnis === 'OK' ? 'BESTANDEN' : 'FEHLGESCHLAGEN',
+        bewertung: prueferErgebnis === 'OK' ? 'BESTANDEN' : 'FEHLGESCHLAGEN',
         kommentarBewertung: prueferErgebnis === 'OK' ? '' : 'NICHT_OKAY bei Eingangsprüfung.',
       });
 	  
@@ -629,7 +629,7 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
 	  const statusHatFehler = dpp.status.includes('Fehler');
 	let hatNichtBestandenenTest = false; 
 	for (const q of dpp.qualitaet) {
-	  if (q.bewertungsergebnis !== 'BESTANDEN') {
+	  if (q.bewertung !== 'BESTANDEN') {
 		hatNichtBestandenenTest = true;
 		break; 
 		}
@@ -665,7 +665,7 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
       eventTimeZoneOffset: timezone(),
       bizStep: CBV.bizstep.receiving,
       action: 'ADD',
-      epcList: [dpp.gs1Id],
+      epcList: [dpp.gs1ID],
       disposition: dispositionWert,
       inputEPCList: [],
       outputEPCList: [],
@@ -684,12 +684,12 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
       const inspEvt = new EPCISEvent({
         eventId: evtId('evt-insp'),
         eventType: 'ObjectEvent',
-        eventTime: inspektionErgebnis.zeit,
+        eventTime: inspektionErgebnis.zeitstempel,
         eventTimeZoneOffset: timezone(),
         bizStep: CBV.bizstep.inspecting,
         action: 'OBSERVE',
-        epcList: [dpp.gs1Id],
-        disposition: inspektionErgebnis.bewertungsergebnis === 'BESTANDEN' ? CBV.disp.conformant : CBV.disp.nonConformant,
+        epcList: [dpp.gs1ID],
+        disposition: inspektionErgebnis.bewertung === 'BESTANDEN' ? CBV.disp.conformant : CBV.disp.nonConformant,
         inputEPCList: [],
         outputEPCList: [],
         readPoint: sgln(empfaengerGln),
@@ -705,14 +705,14 @@ const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
 	//Schreiben wenn nicht gesperrt
     if (dpp.status !== STATUS.gesperrt) evalStatus(dpp);
     await this.datenSchreiben(ctx, dpp);
-    return { success: `Empfang für ${dppId} bestätigt` };
+    return { success: `Empfang für ${dppID} bestätigt` };
   }
 
 
 	//Dpp abfragen und zurückgeben
-  async DPPAbfragen(ctx, dppId) {
-    const buf = await ctx.stub.getState(DPP_PREFIX + dppId);
-    if (!buf.length) throw new Error(`DPP ${dppId} nicht gefunden`);
+  async DPPAbfragen(ctx, dppID) {
+    const buf = await ctx.stub.getState(DPP_PREFIX + dppID);
+    if (!buf.length) throw new Error(`DPP ${dppID} nicht gefunden`);
     return JSON.parse(buf.toString());
   }
 }

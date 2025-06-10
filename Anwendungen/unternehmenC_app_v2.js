@@ -21,7 +21,7 @@ const caName3 = 'ca.org3.example.com';
 const adminIdOrg3 = 'adminOrg3';
 const appBenutzerIdOrg3 = 'appUserOrg3C';
 
-const produktTypIdC = 'Compound PP GF30';
+const produktTypIDC = 'Compound PP GF30';
 ////Berechnet mit https://www.gs1-germany.de/produkte-services/pruefziffernrechner/
 const glnOrgC = '0000000000031';
 const chargeCPrefix = 'CHARGE_C_COMPOUND_';
@@ -94,11 +94,11 @@ async function main() {
         console.log(`Produktionsauftrag aus MES erhalten`);
 
         console.log(`Empfange DPPs von A und B`);
-        const inputDPPIDs = [dppIdVonA, dppIdVonB];
+        const vorproduktDppIDs = [dppIdVonA, dppIdVonB];
 
 
         //Empfangene Dpp überprüfen
-        for (const inputDppId of inputDPPIDs) {
+        for (const inputDppId of vorproduktDppIDs) {
             console.log(`Bearbeite eingehenden DPP ${inputDppId}`);
 
             await fabricUtils.abfrageUndLogDPP(contract, inputDppId, `Status ${inputDppId} vor Empfang C`, true);
@@ -112,15 +112,15 @@ async function main() {
 
         const dppIdC = `DPP_C_005`;
         const chargeC = `Charge_C_005`;
-        const gs1IdC = `urn:epc:id:sgtin:0000003.000003.000003`;
+        const gs1IDC = `urn:epc:id:sgtin:0000003.000003.000003`;
         
         const initialesCompoundTestergebnis = {
-            standardName: compoundDichteTestName, 
-            ergebnis: "1.09", 
+            pruefungsName: compoundDichteTestName, 
+            messwert: "1.09", 
             einheit: "g/cm3",
             systemId: "Compound Test C1", 
             zustaendiger: "PrüferC",
-			offChainProtokoll: "", 
+			offchainProtokoll: "", 
 			dateiHash: "",      
         };
 
@@ -131,12 +131,12 @@ async function main() {
         await contract.submitTransaction(
             'dppTransformieren', 
             dppIdC, 
-            gs1IdC, 
-            produktTypIdC, 
+            gs1IDC, 
+            produktTypIDC, 
             glnOrgC, 
             chargeC, 
             new Date().toISOString().split('T')[0], 
-            JSON.stringify(inputDPPIDs),
+            JSON.stringify(vorproduktDppIDs),
             JSON.stringify(spezifikationenC), 
             JSON.stringify(initialesCompoundTestergebnis)
         );
@@ -150,12 +150,12 @@ async function main() {
 
         console.log(`Test (${compoundZugTestName}) für DPP ${dppIdC}`);
         const zugfestigkeitTestDatenC = { 
-            standardName: compoundZugTestName, 
-            ergebnis: "58", 
+            pruefungsName: compoundZugTestName, 
+            messwert: "58", 
             einheit: "MPa", 
             systemId: "Mechanik System C1",
             zustaendiger: "PrüferC",
-			offChainProtokoll: "", 
+			offchainProtokoll: "", 
 			dateiHash: "",        
         };
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(zugfestigkeitTestDatenC), glnOrgC);
@@ -163,12 +163,12 @@ async function main() {
 
         console.log(`Test (${compoundFarbeTestName}) für DPP ${dppIdC}`);
         const farbTestDatenC = { 
-            standardName: compoundFarbeTestName, 
-            ergebnis: "Grau-Schwarz", 
+            pruefungsName: compoundFarbeTestName, 
+            messwert: "Grau-Schwarz", 
             einheit: "", 
             systemId: "QMS C1",
             zustaendiger: "PrüferC",
-			offChainProtokoll: "", 
+			offchainProtokoll: "", 
 			dateiHash: "",     
         };
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(farbTestDatenC), glnOrgC);
@@ -177,12 +177,12 @@ async function main() {
 
 		// console.log(`Test (${compoundDichteTestName}) für DPP ${dppIdC}`);
 		// const dichteTestDatenC = {
-		// standardName: compoundDichteTestName,
-		// ergebnis: "1.09",         
+		// pruefungsName: compoundDichteTestName,
+		// messwert: "1.09",         
 		// einheit: "g/cm3",
 		// systemId: "Dichtessystem C1",
 		// zustaendiger: "PrüferC",
-		// offChainProtokoll: "",
+		// offchainProtokoll: "",
 		// dateiHash: ""
 		// };
         // await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(dichteTestDatenC), glnOrgC);

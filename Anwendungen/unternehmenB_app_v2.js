@@ -69,7 +69,7 @@ async function main() {
 
         //eindeutige Kennzeichnugen festlegen
         const dppIdB = `DPP_B_005`;
-        const gs1IdB = `urn:epc:id:sgtin:0000002.000002.000002`;
+        const gs1IDB = `urn:epc:id:sgtin:0000002.000002.000002`;
         const chargeB = `Charge_B_005`
 
         const spezifikationenB = [
@@ -85,25 +85,25 @@ async function main() {
         await contract.submitTransaction(
             'ErstellenDPP',
             dppIdB,
-            gs1IdB,
+            gs1IDB,
             stdProduktTypB,
             glnOrgB,
             chargeB,
             new Date().toISOString().split('T')[0],
             JSON.stringify(spezifikationenB)
         );
-        console.log(`DPP ${dppIdB} angelegt mit GS1 ${gs1IdB})`);
+        console.log(`DPP ${dppIdB} angelegt mit GS1 ${gs1IDB})`);
 
 
         let dppStatus = await fabricUtils.abfrageUndLogDPP(contract, dppIdB, "Nach dem Erstellen");
 
         const testDatenGF = {
-            standardName: glasfaserTestNameKosnt,
-            ergebnis: '60.1',
+            pruefungsName: glasfaserTestNameKosnt,
+            messwert: '60.1',
             einheit: 'Gew.-%',
             systemId: 'Testsystem GF B1',
             zustaendiger: 'PrüferB',
-			offChainProtokoll: "",
+			offchainProtokoll: "",
 			dateiHash: "",         
         };
 
@@ -120,12 +120,12 @@ async function main() {
         dppStatus = await fabricUtils.abfrageUndLogDPP(contract, dppIdB, "Nach Glasfaser-Test");
 
         const testDatenMfi = {
-            standardName: mfiTestNameKonst_B,
-            ergebnis: '3.8',
+            pruefungsName: mfiTestNameKonst_B,
+            messwert: '3.8',
             einheit: 'g/10 min',
             systemId: 'B-MFI',
             zustaendiger: 'PrüferB',
-			offChainProtokoll: "", 
+			offchainProtokoll: "", 
 			dateiHash: "",      
         };
         console.log(`Aufzeichnen der Testergebnisse für DPP ${dppIdB}`);
@@ -145,12 +145,12 @@ async function main() {
     //Optionaler Test für Restfeuchte
         console.log(`Optionaler Test wird durchgeführt: Restfeuchte`);
         const testDatenFeuchte = {
-            standardName: feuchteTestNameKonst,
-            ergebnis: '0.03',
+            pruefungsName: feuchteTestNameKonst,
+            messwert: '0.03',
             einheit: '%',
             systemId: 'Laborgerät B1',
             zustaendiger: 'PrüferB',
-            offChainProtokoll: '',
+            offchainProtokoll: '',
             dateiHash: '',
         };
 

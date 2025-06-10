@@ -174,14 +174,14 @@ console.log(`Oracle verarbeitet Test '${args.test}' für DPP ${args.dpp}`);
 
         //Infromationen zu Qualität zusammenstellen
         const qualitaetsDatenEintrag = {
-            standardName: args.test,
-            ergebnis: ergebnisFuerChaincode,
+            pruefungsName: args.test,
+            messwert: ergebnisFuerChaincode,
             einheit: einheitFuerChaincode,
             systemId: args.system,
             zustaendiger: args.zustaendig,
-            offChainProtokoll: args.datei, 
+            offchainProtokoll: args.datei, 
             dateiHash: dateiHash, 
-            bewertungsergebnis: bewertungsergebnisClient,
+            bewertung: bewertungsergebnisClient,
             kommentarBewertung: kommentarClient,
         };
 

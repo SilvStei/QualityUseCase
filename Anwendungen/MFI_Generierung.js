@@ -40,7 +40,7 @@ async function main() {
     }
 
     //ID aus Arg
-    const dppId = process.argv[2];
+    const dppID = process.argv[2];
     //Profil aus Arg
     const qualitaetsProfil = process.argv[3].toUpperCase();
 
@@ -52,7 +52,7 @@ async function main() {
     }
 
 
-    console.log(`DPP: ${dppId}, Profil: ${qualitaetsProfil}`);
+    console.log(`DPP: ${dppID}, Profil: ${qualitaetsProfil}`);
     const rohMfiMesswerte = [];
     const zeitpunktListe = [];
     const startZeit = new Date();
@@ -71,7 +71,7 @@ async function main() {
     }
 
     const zeitstempelDateiTeil = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
-    const ausgabeDateiname = `${dppId}_MFI_ROH_${qualitaetsProfil}_${zeitstempelDateiTeil}.csv`;
+    const ausgabeDateiname = `${dppID}_MFI_ROH_${qualitaetsProfil}_${zeitstempelDateiTeil}.csv`;
     const ausgabePfad = path.join(offChainLogVerzeichnis, ausgabeDateiname);
 
     try {

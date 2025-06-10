@@ -23,7 +23,7 @@ const caName1 = 'ca.org1.example.com';
 const adminIdOrg1 = 'adminOrg1';
 const appBenutzerIdOrg1 = 'appUserOrg1A';
 
-const produktTypIdA = 'Polypropylen_A1';
+const produktTypIDA = 'Polypropylen_A1';
 //Berechnet mit https://www.gs1-germany.de/produkte-services/pruefziffernrechner/
 const glnOrgA = '0000000000017';
 const chargeAPrefix = 'CHARGE_A_';
@@ -42,7 +42,7 @@ const spezifikationenA = [
     { name: dichteTestNameKonst, istNumerisch: true, grenzeNiedrig: 0.89, grenzeHoch: 0.92, einheit: "g/cm3", benoetigt: false }
 ];
 
-//Mfi Test aus Array suchen
+//Mfi Grenzwerte aus Array suchen
 const mfiSpezifikationenA = spezifikationenA.find(s => s.name === mfiTestNameKonst);
 
 async function main() {
@@ -93,16 +93,16 @@ async function main() {
         //eindeutige Kennzeichnugen festlegen
         const dppIdA = `DPP_A_005`;
         const chargeA = `Charge_A_005`;
-        const gs1IdA = `urn:epc:id:sgtin:0000001.000001.000001`;
+        const gs1IDA = `urn:epc:id:sgtin:0000001.000001.000001`;
 
-        console.log(`DPP ${dppIdA} erstellen für Produkt ${produktTypIdA}`);
+        console.log(`DPP ${dppIdA} erstellen für Produkt ${produktTypIDA}`);
 
         //Dpp auf der Blockchain erstellen
         await contract.submitTransaction(
             'ErstellenDPP',
             dppIdA,
-            gs1IdA,
-            produktTypIdA,
+            gs1IDA,
+            produktTypIDA,
             glnOrgA,
             chargeA,
             new Date().toISOString().split('T')[0],
@@ -110,10 +110,13 @@ async function main() {
         );
 
 
-        console.log(`DPP ${dppIdA} ist angelegt mit GS1 ${gs1IdA}`);
+        console.log(`DPP ${dppIdA} ist angelegt mit GS1 ${gs1IDA}`);
 
         //Informationen zu DPP anzeigen
         await fabricUtils.abfrageUndLogDPP(contract, dppIdA,``);
+
+
+
 
         //Sensordaten simulieren
         const sensorQualitaetProfil = "GUT";
@@ -183,12 +186,12 @@ if (!istDppGesperrt) {
         //Konstante für vis Test anlegen
         console.log(`\nAufzeichnen der Prüfung: ${visTestNameKonst}`);
         const visuellTestDatenA = {
-        standardName: visTestNameKonst,
-		ergebnis: "OK",
+        pruefungsName: visTestNameKonst,
+		messwert: "OK",
 		einheit: "",
 		systemId: "QMS-A",
 		zustaendiger: "PrüferA",
-		offChainProtokoll: "ipfs://QmSimuliert1",
+		offchainProtokoll: "ipfs://QmSimuliert1",
 		dateiHash: "", 
 		};
 
@@ -204,12 +207,12 @@ if (!istDppGesperrt) {
 
         //Konstante für Dichteergebnisse
         const dichteTestDatenA = {
-		standardName: dichteTestNameKonst,
-		ergebnis: "0.91",
+		pruefungsName: dichteTestNameKonst,
+		messwert: "0.91",
 		einheit: "g/cm3",
 		systemId: "LIMS Gerät 1",
 		zustaendiger: "Anlage 1",
-		offChainProtokoll: "", 
+		offchainProtokoll: "", 
 		dateiHash: "",       
 		};
 

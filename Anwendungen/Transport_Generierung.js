@@ -23,7 +23,7 @@ if (!fs.existsSync(offChainLogVerzeichnis)) {
 
 
 //Sensorwerte simulieren
-function generiereTransportLogs(dppId, transportProfil) {
+function generiereTransportLogs(dppID, transportProfil) {
     const logs = [];
     const startZeit = new Date();
 
@@ -94,7 +94,7 @@ async function main() {
     }
 
     //Dpp Id holen
-    const dppId = process.argv[2];
+    const dppID = process.argv[2];
     //Transportprofil holen
     const transportProfil = process.argv[3].toUpperCase();
 
@@ -106,8 +106,8 @@ async function main() {
     }
 
     //Eigentliche Logs generieren
-    console.log(`Generiere Logs für DPP ${dppId}, Profil ${transportProfil}`);
-    const transportLogs = generiereTransportLogs(dppId, transportProfil);
+    console.log(`Generiere Logs für DPP ${dppID}, Profil ${transportProfil}`);
+    const transportLogs = generiereTransportLogs(dppID, transportProfil);
 
     //Struktur für CSV festlegen
     let csvInhalt = "zeitstempel,parametertyp,wert,einheit,zustand\n";
@@ -117,7 +117,7 @@ async function main() {
 
     //Informationen für Datei erstellen
     const zeitstempelDateiTeil = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
-    const ausgabeDateiname = `${dppId}_TRANSPORT_${transportProfil}_${zeitstempelDateiTeil}.csv`;
+    const ausgabeDateiname = `${dppID}_TRANSPORT_${transportProfil}_${zeitstempelDateiTeil}.csv`;
     const ausgabePfad = path.join(offChainLogVerzeichnis, ausgabeDateiname);
 
     //Datei schreiben

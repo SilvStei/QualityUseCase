@@ -80,8 +80,8 @@ async function main() {
 
         
         const erwarteterStatus = `Transport zu ${mspIdOrg4}`;
-        if (dpp.besitzerOrg !== mspIdOrg4 || dpp.status !== erwarteterStatus) {
-            throw new Error(`${dppIdVonC} nicht korrekt an ${mspIdOrg4} transferiert; Besitzer ist ${dpp.besitzerOrg} mit Status ${dpp.status}`);
+        if (dpp.besitzerOrganisation !== mspIdOrg4 || dpp.status !== erwarteterStatus) {
+            throw new Error(`${dppIdVonC} nicht korrekt an ${mspIdOrg4} transferiert; Besitzer ist ${dpp.besitzerOrganisation} mit Status ${dpp.status}`);
         }
 
 
@@ -129,10 +129,10 @@ async function main() {
         const testNummer = i + 1;
 
         console.log(`${testNummer}. Qualitätstest:`);
-        console.log(`   Name: ${testEintrag.standardName}`);
-        console.log(`   Ergebnis: ${testEintrag.ergebnis} ${testEintrag.einheit || ''}`); 
-        console.log(`   Bewertung: ${testEintrag.bewertungsergebnis || 'N/A'}`); 
-        console.log(`   Durchgeführt von Organisation: ${testEintrag.durchfuehrendeOrg}`);
+        console.log(`   Name: ${testEintrag.pruefungsName}`);
+        console.log(`   Ergebnis: ${testEintrag.messwert} ${testEintrag.einheit || ''}`); 
+        console.log(`   Bewertung: ${testEintrag.bewertung || 'N/A'}`); 
+        console.log(`   Durchgeführt von Organisation: ${testEintrag.durchfuehrendeOrganisation}`);
         console.log('\n');
          } 
         }
