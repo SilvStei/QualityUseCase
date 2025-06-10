@@ -46,7 +46,9 @@ const spezifikationenA = [
 const mfiSpezifikationenA = spezifikationenA.find(s => s.name === mfiTestNameKonst);
 
 async function main() {
+
     let gateway;
+    let istDppGesperrt = false;
     try {
 
         //Lesen Connection Profil und umwandeln
@@ -69,7 +71,6 @@ async function main() {
         //Benutzer anlegen
         await fabricUtils.erstelleBenutzer(wallet, ca, mspIdOrg1, appBenutzerIdOrg1, adminIdOrg1, 'org1.department1', 'A');
         
-
         //Verbindung zum eigentlichen Netzwerk herstellen
         gateway = new Gateway();
         await gateway.connect(ccp, {
@@ -82,6 +83,12 @@ async function main() {
         const network = await gateway.getNetwork('mychannel');
         //auf chaincode im Kanal zugreifen
         const contract = network.getContract('dpp_quality');
+
+
+
+
+
+
 
         //eindeutige Kennzeichnugen festlegen
         const dppIdA = `DPP_A_005`;
@@ -109,7 +116,7 @@ async function main() {
         await fabricUtils.abfrageUndLogDPP(contract, dppIdA,``);
 
         //Sensordaten simulieren
-        const sensorQualitaetProfil = "SCHLECHT";
+        const sensorQualitaetProfil = "GUT";
         console.log(`Starten des simulierten Inline-MFI-Sensors mit Profil ${sensorQualitaetProfil} für DPP ${dppIdA}`);
 
         let pfadRohdaten;
@@ -160,10 +167,19 @@ async function main() {
             console.error("Fehler beim Oracle", e.message);
             throw e;
         }
+// Status nach Test prüfen
+        const dppNachMfiBytes = await contract.evaluateTransaction('DPPAbfragen', dppIdA);
+        const dppNachMfi = JSON.parse(dppNachMfiBytes.toString());
+
+        if (dppNachMfi.status === 'Gesperrt') {
+            console.error(`\nDPP ${dppIdA} gesperrt - Weitere Tests übersprungen`);
+            istDppGesperrt = true;
+        }
+
 
         //Nochmal Aufrufen
         await fabricUtils.abfrageUndLogDPP(contract, dppIdA, "");
-
+if (!istDppGesperrt) {
         //Konstante für vis Test anlegen
         console.log(`\nAufzeichnen der Prüfung: ${visTestNameKonst}`);
         const visuellTestDatenA = {
@@ -180,6 +196,9 @@ async function main() {
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(visuellTestDatenA), glnOrgA);
         console.log(`Daten aus QMS erfolgreich übermittelt`);
         await fabricUtils.abfrageUndLogDPP(contract, dppIdA, ``);
+    }
+
+    if (!istDppGesperrt) {
 
         console.log(`\nAufzeichnen Laborergebnis: ${dichteTestNameKonst}`);
 
@@ -197,6 +216,9 @@ async function main() {
         //Testergebnisse schreiben
         await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdA, JSON.stringify(dichteTestDatenA), glnOrgA);
         console.log(`Daten aus LIMS erfolgreich übermittelt`);
+
+    }
+
         const dppFinal = await fabricUtils.abfrageUndLogDPP(contract, dppIdA, ``);
 
 

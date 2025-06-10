@@ -79,9 +79,9 @@ async function main() {
 
 
         
-        const erwarteterStatusPrefix = `TransportZu_${mspIdOrg4}`;
-        if (dpp.ownerOrg !== mspIdOrg4 || !dpp.status.startsWith(erwarteterStatusPrefix)) {
-            throw new Error(`${dppIdVonC} nicht korrekt an ${mspIdOrg4} transferiert; Besitzer ist ${dpp.ownerOrg} mit Status ${dpp.status}`);
+        const erwarteterStatus = `Transport zu ${mspIdOrg4}`;
+        if (dpp.besitzerOrg !== mspIdOrg4 || dpp.status !== erwarteterStatus) {
+            throw new Error(`${dppIdVonC} nicht korrekt an ${mspIdOrg4} transferiert; Besitzer ist ${dpp.besitzerOrg} mit Status ${dpp.status}`);
         }
 
 
@@ -123,9 +123,9 @@ async function main() {
 		//Qualitätshistorie prüfen
         console.log(`Prüfen der Qualitätshistorie von ${dppIdVonC}`);
 
-        if (dpp.quality && dpp.quality.length > 0) {
-        for (let i = 0; i < dpp.quality.length; i++) {
-        const testEintrag = dpp.quality[i];
+        if (dpp.qualitaet && dpp.qualitaet.length > 0) {
+        for (let i = 0; i < dpp.qualitaet.length; i++) {
+        const testEintrag = dpp.qualitaet[i];
         const testNummer = i + 1;
 
         console.log(`${testNummer}. Qualitätstest:`);

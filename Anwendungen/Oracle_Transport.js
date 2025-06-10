@@ -14,7 +14,7 @@ const crypto = require('crypto');
 //Konsolenargumente lesen und bearbeiten
 function parseArgumente() {
     const parser = new ArgumentParser({
-        beschreibung: 'Transportdaten verarbeiten und hashen'
+        description: 'Transportdaten verarbeiten und hashen'
     });
     parser.add_argument('--dpp', { required: true });
     parser.add_argument('--datei', { required: true });

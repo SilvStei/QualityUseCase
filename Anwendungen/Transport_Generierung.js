@@ -81,7 +81,7 @@ function generiereTransportLogs(dppId, transportProfil) {
             zustand: erschuetterungZustand,
         });
     }
-
+return logs;
 }
 
 

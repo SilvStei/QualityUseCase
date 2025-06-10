@@ -1,0 +1,16 @@
+zeitstempel,parametertyp,wert,einheit,zustand
+2025-06-10T11:37:21.357Z,Relative Feuchtigkeit,46.8,%,OK
+2025-06-10T11:37:21.357Z,Temperatur,26.3,°C,OK
+2025-06-10T11:47:21.357Z,Erschütterung,0.37,g,OK
+2025-06-10T11:37:22.357Z,Relative Feuchtigkeit,42.5,%,OK
+2025-06-10T11:37:22.357Z,Temperatur,26.9,°C,OK
+2025-06-10T11:47:22.357Z,Erschütterung,0.02,g,OK
+2025-06-10T11:37:23.357Z,Relative Feuchtigkeit,42.3,%,OK
+2025-06-10T11:37:23.357Z,Temperatur,17.0,°C,OK
+2025-06-10T11:47:23.357Z,Erschütterung,0.47,g,OK
+2025-06-10T11:37:24.357Z,Relative Feuchtigkeit,43.0,%,OK
+2025-06-10T11:37:24.357Z,Temperatur,15.1,°C,OK
+2025-06-10T11:47:24.357Z,Erschütterung,0.75,g,OK
+2025-06-10T11:37:25.357Z,Relative Feuchtigkeit,40.9,%,OK
+2025-06-10T11:37:25.357Z,Temperatur,5.1,°C,OK
+2025-06-10T11:47:25.357Z,Erschütterung,0.34,g,OK

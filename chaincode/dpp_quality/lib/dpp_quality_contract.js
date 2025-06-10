@@ -419,14 +419,14 @@ class DPPqualitaetContract extends Contract {
     const msp = await this.mspidHolen(ctx);
 
 	//Json in Array umwandeln
-    const inputIds = umwandelnJSON(inputIdsJSON, 'InputDPPIDs JSON ungültig');
-    const inputgs1Ids = [];
+  const inputIds = umwandelnJSON(inputIdsJSON, 'InputDPPIDs JSON ungültig');
+  const inputgs1Ids = [];
 
-    for (const id of inputIds) {
-      const buf = await ctx.stub.getState(DPP_PREFIX + id);
-      if (!buf.length) throw new Error(`InputDPP ${id} nicht gefunden`);
-	  //buf für weitere Verwendung nutzbar machen
-		const inp = JSON.parse(buf.toString());
+  for (const id of inputIds) {
+    const buf = await ctx.stub.getState(DPP_PREFIX + id);
+    if (!buf.length) throw new Error(`InputDPP ${id} nicht gefunden`);
+  //buf für weitere Verwendung nutzbar machen
+  const inp = JSON.parse(buf.toString());
 
 
 	 //nur inputDpps verwenden die für Transformation geeignet sind, also die von der aktuellen Org akzeptiert wurden
@@ -455,21 +455,21 @@ class DPPqualitaetContract extends Contract {
 
 	//Tranformationsevent (basierend auf https://ref.gs1.org/docs/epcis/examples/transformation_event_all_possible_fields.jsonld)
 	//bizStep commissioning?
-    const tfEvt = new EPCISEvent({
-      eventId: evtId('evt-tf'),
-      eventType: 'TransformationEvent',
-      eventTime: new Date().toISOString(),
-      eventTimeZoneOffset: timezone(),
-      bizStep: CBV.bizstep.transforming,
-      action: 'OBSERVE',
-      epcList: [],
-      disposition: '',
-      inputEPCList: inputgs1Ids,
-      outputEPCList: [outputGs1],
-      readPoint: sgln(aktuelleGln),
-      bizLocation: sgln(aktuelleGln),
-      extensions: {},
-    });
+  const tfEvt = new EPCISEvent({
+    eventId: evtId('evt-tf'),
+    eventType: 'TransformationEvent',
+    eventTime: new Date().toISOString(),
+    eventTimeZoneOffset: timezone(),
+    bizStep: CBV.bizstep.transforming,
+    action: 'OBSERVE',
+    epcList: [],
+    disposition: '',
+    inputEPCList: inputgs1Ids,
+    outputEPCList: [outputGs1],
+    readPoint: sgln(aktuelleGln),
+    bizLocation: sgln(aktuelleGln),
+    extensions: {},
+  });
 
 //Initiales Testergbnis schreiben
     if (initialTestJSON && initialTestJSON !== '{}') {
@@ -482,6 +482,41 @@ class DPPqualitaetContract extends Contract {
       tfEvt.extensions.transformationsTest = initTE;
 	  //Testergbnis zu den Qualitätsdaten hinzufügen um schnellen Überblick über Historie zu bekommen
       outDpp.qualitaet.push(initTE);
+
+//Regeln aus Spezifikationen holen um Tests bewerten zu können      
+const std = outDpp.spezifikationen.find(s => s.name === initTE.standardName);
+
+        //schauen ob Testergebnis keine Bewertung hat
+        if (!initTE.bewertungsergebnis) {
+          //gibt es Standard für Bewertung
+            if (std && std.istNumerisch) {
+              //zum Nutzen umwandeln in Zahl
+                const val = parseFloat(initTE.ergebnis);
+                if (!Number.isNaN(val) && val >= std.grenzeNiedrig && val <= std.grenzeHoch) {
+                    initTE.bewertungsergebnis = 'BESTANDEN';
+                } else {
+                    initTE.bewertungsergebnis = 'FEHLGESCHLAGEN';
+                    initTE.kommentarBewertung = `Wert ${val} außerhalb Toleranz [${std.grenzeNiedrig}, ${std.grenzeHoch}]`;
+                }
+            } else if (std) { 
+                if ((initTE.ergebnis || '').toLowerCase() === (std.wertErwartet || '').toLowerCase()) {
+                    initTE.bewertungsergebnis = 'BESTANDEN';
+                } else {
+                    initTE.bewertungsergebnis = 'FEHLGESCHLAGEN';
+                }
+            } else {
+                initTE.bewertungsergebnis = 'INFO_KEIN_STANDARD';
+             }
+        }
+        
+        //Falls Test bestanden aus offener Liste streichen
+        if (std && std.benoetigt && initTE.bewertungsergebnis === 'BESTANDEN') {
+            const erledigterTestName = initTE.standardName;
+            //Bestandenen Test aus Liste mit offnen Prüfungen filtern
+            outDpp.offenePflichtpruefungen = outDpp.offenePflichtpruefungen.filter(name => name !== erledigterTestName);
+        }
+
+
     }
 	
 	//Transformation zur EPCIS Liste hinzufügen

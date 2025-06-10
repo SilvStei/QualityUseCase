@@ -97,7 +97,7 @@ async function abfrageUndLogDPP(contract, dppId, kontextNachricht, includeOwner 
 
     let logMessage = `Status des DPP: ${dpp.status}`;
     if (includeOwner) {
-        logMessage += `, Besitzer: ${dpp.ownerOrg}`;
+        logMessage += `, Besitzer: ${dpp.besitzerOrg}`;
     }
     console.log(logMessage);
 

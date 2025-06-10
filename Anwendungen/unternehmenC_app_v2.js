@@ -110,8 +110,8 @@ async function main() {
             await fabricUtils.abfrageUndLogDPP(contract, inputDppId, `Status ${inputDppId} nach Empfang C`, true);
         }
 
-        const dppIdC = `DPP_C_001`;
-        const chargeC = `Charge_C_001`;
+        const dppIdC = `DPP_C_005`;
+        const chargeC = `Charge_C_005`;
         const gs1IdC = `urn:epc:id:sgtin:0000003.000003.000003`;
         
         const initialesCompoundTestergebnis = {
@@ -175,22 +175,26 @@ async function main() {
         await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status des Compound DPP ${dppIdC} nach Farbtest`, true);
 
 
-		console.log(`Test (${compoundDichteTestName}) für DPP ${dppIdC}`);
-		const dichteTestDatenC = {
-		standardName: compoundDichteTestName,
-		ergebnis: "1.09",         
-		einheit: "g/cm3",
-		systemId: "Dichtessystem C1",
-		zustaendiger: "PrüferC",
-		offChainProtokoll: "",
-		dateiHash: ""
-		};
-        await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(dichteTestDatenC), glnOrgC);
-        let dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Dichteprüfung`, true);
+		// console.log(`Test (${compoundDichteTestName}) für DPP ${dppIdC}`);
+		// const dichteTestDatenC = {
+		// standardName: compoundDichteTestName,
+		// ergebnis: "1.09",         
+		// einheit: "g/cm3",
+		// systemId: "Dichtessystem C1",
+		// zustaendiger: "PrüferC",
+		// offChainProtokoll: "",
+		// dateiHash: ""
+		// };
+        // await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdC, JSON.stringify(dichteTestDatenC), glnOrgC);
+        // let dppCObj = await fabricUtils.abfrageUndLogDPP(contract, dppIdC, `Status Compound DPP ${dppIdC} nach Dichteprüfung`, true);
 
         //Zeigen wie es vor dem Transport ist
-        console.log(`Compound-DPP ${dppIdC} vor Transport`, JSON.stringify(dppCObj, null, 2));
+        //console.log(`Compound-DPP ${dppIdC} vor Transport`, JSON.stringify(dppCObj, null, 2));
 
+        const dppFinalBytes = await contract.evaluateTransaction('DPPAbfragen', dppIdC);
+        let dppCObj = JSON.parse(dppFinalBytes.toString());
+
+    console.log(`\nInhalt von ${dppIdC} vor Transport:`, JSON.stringify(dppCObj, null, 2));
 
         //Transport simulieren
         if (dppCObj.status === "Freigegeben" || dppCObj.status === "FreigegebenMitFehler") {
@@ -209,7 +213,7 @@ async function main() {
 
 
             //Simulieren der Transportsensoren
-            console.log(`Starte Transportsimulation des DPP ${dppIdC} mit Profil ${transportProfilArg})`);
+            console.log(`Starte Transportsimulation des DPP ${dppIdC} mit Profil ${transportProfilArg}`);
 
             //Logik wie bei Inline-Sensor (Skript A)
             let transportRohdatenPfad;

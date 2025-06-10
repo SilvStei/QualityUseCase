@@ -27,7 +27,7 @@ const gs1FirmenPrefixB = '9999992';
 const stdProduktTypB = 'Polypropylen mit Glasfaser 60%';
 
 const glasfaserTestNameKosnt = "Glasfaser-Gewichtsanteil";
-const mfiTestNameKonst_B = "Schmelzflussindex ";
+const mfiTestNameKonst_B = "Schmelzflussindex";
 const feuchteTestNameKonst = "Restfeuchte";
 
 
@@ -68,9 +68,9 @@ async function main() {
         const contract = network.getContract('dpp_quality');
 
         //eindeutige Kennzeichnugen festlegen
-        const dppIdB = `DPP_B_001`;
+        const dppIdB = `DPP_B_005`;
         const gs1IdB = `urn:epc:id:sgtin:0000002.000002.000002`;
-        const chargeB = `Charge_B_001`
+        const chargeB = `Charge_B_005`
 
         const spezifikationenB = [
             { name: glasfaserTestNameKosnt, istNumerisch: true, grenzeNiedrig: 59.5, grenzeHoch: 60.5, einheit: 'Gew.-%', benoetigt: true },
@@ -141,6 +141,22 @@ async function main() {
         if(dppStatus.status === "Freigegeben") {
             console.log("Produkt hat alle Pflichtprüfungen bestanden und DPP ist freigegeben");
         }
+
+    //Optionaler Test für Restfeuchte
+        console.log(`Optionaler Test wird durchgeführt: Restfeuchte`);
+        const testDatenFeuchte = {
+            standardName: feuchteTestNameKonst,
+            ergebnis: '0.03',
+            einheit: '%',
+            systemId: 'Laborgerät B1',
+            zustaendiger: 'PrüferB',
+            offChainProtokoll: '',
+            dateiHash: '',
+        };
+
+await contract.submitTransaction('AufzeichnenTestergebnisse', dppIdB, JSON.stringify(testDatenFeuchte), glnOrgB);
+        console.log(`Optionale Daten zur Restfeuchte geschrieben`);
+
 
         const dppFinal = JSON.parse((await contract.evaluateTransaction('DPPAbfragen', dppIdB)).toString());
 
